@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Models (large, not committed)
+models/
+*.gguf
+
+# OS / editor
+.DS_Store
+Thumbs.db
