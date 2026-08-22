@@ -77,6 +77,7 @@ def main() -> None:
     parser.add_argument("--mock", action="store_true", help="use a deterministic no-model backend for integration tests")
     parser.add_argument("--config", default="config/cloud.yaml", help="private cloud deployment YAML")
     args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     if args.mock:
         configure_runtime(mock=True)
     else:
@@ -113,10 +114,20 @@ def agent_run(req: dict) -> dict:
     if errs:
         raise HTTPException(status_code=400, detail=f"task_request 校验失败: {'; '.join(errs[:5])}")
 
+    logger.info(
+        "agent request session=%s app=%s activity=%s nodes=%d history_rounds=%d",
+        req["session_id"], req.get("app") or "-", req.get("activity") or "-",
+        req.get("ui_xml", "").count("<node"), len(req.get("history") or []),
+    )
+
     try:
         fixed_response = route_fixed_skill(session_id=req["session_id"], intent=req["intent"])
         if fixed_response is not None:
-            return _validate_response_for_request(fixed_response, req["session_id"])
+            response = _validate_response_for_request(fixed_response, req["session_id"])
+            logger.info("agent response session=%s source=fixed actions=%s done=%s observe=%s",
+                        req["session_id"], [a.get("type") for a in response.get("actions", [])],
+                        response.get("done"), response.get("need_observation"))
+            return response
         resp = decision_fn(
             session_id=req["session_id"],
             intent=req["intent"],
@@ -125,7 +136,11 @@ def agent_run(req: dict) -> dict:
             app=req.get("app"),
             activity=req.get("activity"),
         )
-        return _validate_response_for_request(resp, req["session_id"])
+        response = _validate_response_for_request(resp, req["session_id"])
+        logger.info("agent response session=%s source=llm actions=%s done=%s observe=%s",
+                    req["session_id"], [a.get("type") for a in response.get("actions", [])],
+                    response.get("done"), response.get("need_observation"))
+        return response
     except Exception as exc:  # LLM 网络/服务异常 → 50x（Tasker 可重试）
         logger.exception("决策失败")
         raise HTTPException(status_code=502, detail=f"决策服务异常: {exc}") from exc

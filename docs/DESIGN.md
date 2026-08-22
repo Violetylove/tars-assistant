@@ -245,6 +245,7 @@ Python 包。后续可将其作为 Python 决策层的编排实现，但不改�
 - 手机不安装或运行 GGUF、llama.cpp、llama-server；Termux 只承载 Python Agent。
 - 云端返回内容仍是不可信输入，必须经 Agent schema 校验与 Android 执行安全层。
 - 代理边界：Termux Agent 到云端的 HTTPS 请求可按部署环境使用代理；Android↔Agent 的 loopback 请求固定绕过代理，且不得通过 ADB `tcp:10000` 等遗留转发改变 `127.0.0.1:8080` 通信拓扑。
+- 运行审计日志：Agent 以 INFO 记录请求会话、前台包/窗口、UI 节点数量、history 轮数，以及响应动作类型、`done`、`need_observation`；不记录任务正文、原始 UI、输入文本、云端响应原文或凭据。
 
 ## 9. 部署拓扑
 
