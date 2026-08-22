@@ -59,7 +59,9 @@ class ActionExecutor(
     private fun executeOne(action: AgentAction): Boolean {
         return when (action.type) {
             "click" -> findNode(action.targetNodeId)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
-            "type" -> findNode(action.targetNodeId)?.let { node ->
+            "type" -> findEditableNode(action.targetNodeId)?.let { node ->
+                // 先确保目标输入框聚焦，再尝试无障碍 SET_TEXT；失败才回退 Shizuku input text，
+                // 此时焦点已落在目标字段，注入不会落到错误位置。
                 val focused = node.isFocused || node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
                 val setText = focused && node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
                     putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, action.text.orEmpty())
@@ -106,6 +108,31 @@ class ActionExecutor(
         // Must mirror agent.ui_summarizer.MAX_NODES, because IDs are post-truncation summary IDs.
         return nodes.take(60).getOrNull(id)
     }
+
+    /** Resolve a type target to an actual editable node.
+     *
+     * Summary IDs can map to a container (e.g. Gmail's recipient-row ViewGroup) on
+     * the live tree even though the summarizer indexed the inner EditText. Resolve
+     * the editable node itself so ACTION_FOCUS targets the real input field and the
+     * Shizuku fallback types into it rather than whatever currently has focus.
+     */
+    private fun findEditableNode(id: Int?): AccessibilityNodeInfo? {
+        val node = findNode(id) ?: return null
+        if (isEditableNode(node)) return node
+        return findEditableDescendant(node)
+    }
+
+    private fun findEditableDescendant(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            if (isEditableNode(child)) return child
+            findEditableDescendant(child)?.let { return it }
+        }
+        return null
+    }
+
+    private fun isEditableNode(node: AccessibilityNodeInfo): Boolean =
+        node.className?.toString()?.contains("EditText", ignoreCase = true) == true
 
     private fun collect(node: AccessibilityNodeInfo?, out: MutableList<AccessibilityNodeInfo>) {
         if (node == null) return

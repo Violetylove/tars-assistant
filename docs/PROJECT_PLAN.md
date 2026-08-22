@@ -34,7 +34,7 @@
 | 2 | Agent 端：HTTP 服务 + UI 摘要器 + 决策循环 | 🟢 已完成 |
 | 3 | 云端模型接入与私有配置 | 🟢 已完成 |
 | 4 | 原生执行侧 App（Kotlin）：UI 采集 + 动作执行 + HTTP client | 🟢 已完成 |
-| 5 | 触发一期 + 端到端集成 + 演示技能 + 部署文档 | 🔵 进行中（剩余 Android 通用输入诊断） |
+| 5 | 触发一期 + 端到端集成 + 演示技能 + 部署文档 | 🟢 已完成（Gmail 跨应用通用输入诊断与执行层修复已闭环） |
 
 ### 阶段 0：文档奠基
 - [x] AGENTS.md（项目记忆，含 D1–D4 与工程约定）
@@ -191,3 +191,4 @@
 | 2026-08-22 | Gmail 自动表单回归：Agent 可自动启动 Gmail 并进入 `ComposeActivityGmail`，收件人字段获得焦点；本轮云端未继续生成 `type`，未发送邮件。后续聚焦模型多轮动作规划，不增加 Gmail 专用状态机。 |
 | 2026-08-22 | Agent 可观测性缺陷：服务此前只记录异常，新增不含敏感内容的请求/响应元数据日志，记录会话、节点数量、动作类型及观察控制字段，用于定位跨应用多轮规划中断。 |
 | 2026-08-22 | Gmail 输入故障定位：设备 Agent 日志确认云端连续生成 `home`、`click`、`click`、`type`；TARS 回执显示 `type` 执行失败，问题转移至 Android 节点定位/无障碍输入/Shizuku 回退。新增执行诊断日志，APK 已构建安装。 |
+| 2026-08-22 | Gmail 输入执行层诊断闭环：以三阶段确定性探针（launch Gmail → 点写邮件 → type 收件人）在 AVD 复现完整链路；实证 Shizuku `input text` 回退能把真实邮箱 `violetylove@163.com` 注入 Gmail 收件人字段并解析出联系人 Winter Yuan，之前"执行失败"根因是 Shizuku 未就绪而非链路失效。同时定位执行层确定性缺陷：`findNode` 命中 Gmail 收件人行容器 `android.view.ViewGroup` 而非内部 `EditText`，导致 `ACTION_FOCUS`/`ACTION_SET_TEXT` 失效、只能靠 `input text` 注入系统当前焦点侥幸成功。修复：`ActionExecutor.findEditableNode` 将 type 目标解析为实际可输入节点，先聚焦再 SET_TEXT、失败才回退 Shizuku；并统一 `agent/ui_summarizer.py` 与 Kotlin `collect()` 的可交互类名判定为 contains 语义，消除两端节点集合漂移。修复后复跑两次均 `class=android.widget.EditText focused=true setText=true`，确定性成功且无需 Shizuku 回退。Agent 单测 59 项全绿。 |

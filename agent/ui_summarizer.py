@@ -23,12 +23,15 @@ MAX_NODES = 60          # 单屏最多保留的可交互节点数
 MAX_TEXT_LEN = 40       # 单个文本最大保留长度（避免撑爆）
 MAX_INPUT_CHARS = 2000  # 输入框允许的最大回显文本长度
 
-# 交互判定：不可用的直接排除
-_IMPORTANT_CLASS_RE = re.compile(
-    r"(?:Button|EditText|CheckBox|RadioButton|Switch|ImageView).*Button|"
-    r"android\.widget\.(?:Button|EditText|ImageButton|CheckBox|RadioButton|Switch)$",
-    re.I,
-)
+# 交互判定：不可用的直接排除。
+# 与 android ActionExecutor.collect() 保持一致的 contains 语义（Kotlin 用
+# className.contains("EditText") 等子串匹配），否则含自定义输入 View 的界面
+# （如 Gmail RecipientEditText）两端节点集合会漂移、action ID 错位。
+_IMPORTANT_CLASS_TOKENS = ("button", "edittext", "checkbox", "radiobutton", "switch", "imagebutton")
+
+
+def _is_important_class(class_: str) -> bool:
+    return any(token in class_.lower() for token in _IMPORTANT_CLASS_TOKENS)
 
 
 def _parse_bounds(bounds_spec: str) -> tuple[int, int, int, int] | None:
@@ -87,7 +90,7 @@ class Summarizer:
             return True
         # 某些按钮用 class + enabled 判定
         class_ = elem.get("class") or ""
-        if _IMPORTANT_CLASS_RE.search(class_) and _is_true(elem.get("enabled", "true")):
+        if _is_important_class(class_) and _is_true(elem.get("enabled", "true")):
             return True
         return False
 

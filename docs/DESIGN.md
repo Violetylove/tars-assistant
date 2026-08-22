@@ -194,7 +194,10 @@ LLM 视角的紧凑行格式：`[12] 按钮"发送" (450,900)`——供 prompt �
 
 - 输入：原始 UI 树 XML（uiautomator dump 或无障碍采集，可能数千行）
 - 处理管线：
-  1. **过滤**：仅保留可交互节点（clickable / input / 有文本的可点击项）
+  1. **过滤**：仅保留可交互节点（clickable / input / 有文本的可点击项）；可交互类名判定采用
+     contains 子串语义（Button/EditText/CheckBox/RadioButton/Switch/ImageButton），必须与 Android
+     执行侧 `ActionExecutor.collect()` 完全一致，避免含自定义输入 View 的界面（如 Gmail
+     `RecipientEditText`）两端节点集合漂移、action ID 错位
   2. **截断**：文本超长截断；节点数超限（暂定 60 个）按可视区域优先级裁剪
   3. **排序**：按 bounds 从上到下、从左到右
 - 输出：紧凑行文本（喂 LLM）+ 结构化 nodes（供执行引用 id）
@@ -215,9 +218,11 @@ UI 采集方案（D2，AVD 实测后已定）：
 | Shizuku | 参数受限的 `input swipe`、`input text` 回退 | Shizuku 授权（starter/无线调试） | `dev.rikka.shizuku` 官方 UserService + AIDL |
 
 原生 App 作为执行侧统一调度两通道：普通动作优先走无障碍（无需额外权限逻辑）；若 `type` 的
-`ACTION_SET_TEXT` 失败，才以已授权 Shizuku 的 `input text` 回退。Shizuku UserService 仅暴露已定义的
-动作方法；`swipe` 的坐标/时长和 `text` 的长度均由 App 校验，文本作为 `ProcessBuilder` 的独立参数传递，
-不传递 LLM 生成的 shell 命令。
+`ACTION_SET_TEXT` 失败，才以已授权 Shizuku 的 `input text` 回退。`type` 执行前会把目标节点解析为
+实际可输入组件（若摘要 ID 命中的是容器节点，如 Gmail 收件人行 `ViewGroup`，则向下取内部 `EditText`），
+先聚焦目标输入框再尝试 `ACTION_SET_TEXT`，因此 Shizuku 回退注入的是目标字段而非系统当前焦点。
+Shizuku UserService 仅暴露已定义的动作方法；`swipe` 的坐标/时长和 `text` 的长度均由 App 校验，
+文本作为 `ProcessBuilder` 的独立参数传递，不传递 LLM 生成的 shell 命令。
 
 Shizuku UserService 的首次绑定在有界等待窗口内监听 Binder 回调；服务就绪即执行当前受限动作，超时则
 返回失败并按执行层的失败收敛规则停止，避免首次高权限动作因固定等待时序被误判失败。

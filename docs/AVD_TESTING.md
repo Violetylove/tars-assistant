@@ -41,6 +41,8 @@
 21. [x] AVD 全局代理设为宿主机 `10.0.2.2:10000` 后，`open gmail` 成功进入 `com.google.android.gm`；后续模型动作触发 TARS 敏感点击确认弹窗，测试选择取消，回执为 `已取消: click`，未发送邮件。
 22. [~] 自动跨应用任务再次成功进入 Gmail `ComposeActivityGmail`，收件人 `EditText` 保持焦点且主题/正文为空；云端本轮未继续下发 `type`，未触发发送确认，未发送邮件。剩余问题限定为模型动作链连续规划。
 23. [x] 设备审计日志复验：同步最新 `agent/server.py` 后，真实 Gmail 会话日志记录 `home`、`click`、`click`、`type` 四轮响应；TARS 最终回执为 `执行失败: type`。诊断 APK 已安装，暂停继续操作，待后续读取 `TarsAction`/`TarsShizuku` 细节。
+24. [x] Gmail 输入执行层诊断：三阶段确定性探针（launch Gmail → 点写邮件 → type 收件人）驱动 TARS 完整复现；`TarsAction` 日志确认 `type target=7 class=android.view.ViewGroup focused=false setText=false`，`findNode` 命中收件人行容器而非内部 `EditText`；Shizuku `input text` 回退将真实邮箱 `violetylove@163.com` 注入当前焦点，Gmail 解析出联系人 Winter Yuan。
+25. [x] 执行层修复验证：`ActionExecutor` 新增 `findEditableNode`（type 目标向下解析为实际可输入节点，先聚焦再 SET_TEXT），并统一 `agent/ui_summarizer.py` 与 Kotlin `collect()` 的类名可交互判定为 contains 语义。修复后复跑两次均 `type target=7 class=android.widget.EditText focused=true setText=true`，无障碍直写成功、无需 Shizuku 回退；收件人字段保留 `violetylove@163.com` 与联系人解析。
 
 ## 已完成验收
 
