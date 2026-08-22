@@ -1,0 +1,9 @@
+# Copy to config/cloud.yaml and fill the real values. config/cloud.yaml is Git-ignored.
+# The provider API key stays in the Termux Agent private configuration. Do not put it in Android.
+
+# OpenAI-compatible cloud model endpoint.
+llm:
+  base_url: "https://api.example.com/v1"
+  model: "replace-with-provider-model-id"
+  api_key: "REPLACE_WITH_PROVIDER_KEY"
+  timeout_seconds: 60

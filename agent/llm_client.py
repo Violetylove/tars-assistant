@@ -1,7 +1,6 @@
-"""llm_client — 对本地推理端点（OpenAI 兼容 /v1/chat/completions）的封装。
+"""llm_client — 对云端 OpenAI-compatible 推理端点的封装。
 
-决策 D3：模型档位（3B/7B）经配置化 base_url + model，换模型不改代码。
-决策 D5：llama-server 按需拉起，由 server/agent_loop 协同管理生命周期。
+决策 D3：云端模型经私有配置的 base_url + model 切换，不改 Agent 代码。
 
 可 mock 性：LLMClient 定义 `complete()` 接口；`MockLLM` 实现同接口用于开发/测试
 （不依赖真实模型与网络）。默认走 `requests`，仅在产品模式实例化。
@@ -15,11 +14,11 @@ from typing import Any, Callable, Optional
 
 
 class LLMClient:
-    """调用本地 OpenAI 兼容推理端点。"""
+    """调用云端 OpenAI-compatible 推理端点。"""
 
-    def __init__(self, base_url: str = "http://127.0.0.1:11434/v1",
-                 model: str = "qwen2.5:3b",
-                 api_key: str = "not-needed", timeout: float = 60.0):
+    def __init__(self, base_url: str,
+                 model: str,
+                 api_key: str, timeout: float = 60.0):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key

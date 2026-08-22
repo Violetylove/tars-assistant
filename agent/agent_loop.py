@@ -27,7 +27,8 @@ SYSTEM_PROMPT = (
     "swipe(x1/y1/x2/y2/duration_ms), back, home, wait(ms), reply(给用户的话), done。\n"
     "输出严格 JSON 对象，不要任何多余说明。当某一步做不了时应输出 "
     '{"type":"reply","text":"..."}；当任务完成输出 {"type":"done"}。\n'
-    "节点行格式：[id] 类型\"文本\" (cx,cy)。"
+    "节点行格式：[id] 类型\"文本\" (cx,cy)。click 和 type 的 target_node_id 必须是该节点的"
+    " JSON 整数（例如 1，绝不能写成字符串 \"1\"）。"
 )
 
 # Confirmation is derived from UI content, never trusted to the model's flag alone.
@@ -78,6 +79,28 @@ def _enforce_sensitive_confirmation(resp: dict, nodes: list[dict]) -> None:
         label = (node or {}).get("text", "").casefold()
         if any(term in label for term in _SENSITIVE_LABELS):
             action["requires_confirmation"] = True
+
+
+def _normalize_known_node_ids(resp: dict, nodes: list[dict]) -> None:
+    """Normalize only an unambiguous model formatting error before schema validation.
+
+    Models occasionally quote an otherwise valid node id.  This is not a general
+    coercion layer: the value must be ASCII digits, belong to the current UI
+    snapshot, and appear on an action type which actually targets a UI node.
+    Every other malformed value continues to fail the protocol schema.
+    """
+    node_ids = {node["id"] for node in nodes}
+    for action in resp.get("actions", []):
+        if not isinstance(action, dict) or action.get("type") not in {"click", "type"}:
+            continue
+        target_node_id = action.get("target_node_id")
+        if (
+            isinstance(target_node_id, str)
+            and target_node_id.isascii()
+            and target_node_id.isdecimal()
+            and int(target_node_id) in node_ids
+        ):
+            action["target_node_id"] = int(target_node_id)
 
 
 def decide_once(
@@ -147,6 +170,7 @@ def decide_once(
                 continue
             return _safe_response(session_id, f"LLM 输出缺少可识别的动作字段：{obj}")
 
+        _normalize_known_node_ids(resp, nodes)
         _enforce_sensitive_confirmation(resp, nodes)
         errs = validate(resp, "agent_response")
         if not errs:

@@ -26,10 +26,11 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var intentInput: EditText
     private lateinit var voice: VoiceIntentCapture
+    @Volatile private var requestInFlight = false
     private val triggerReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == TarsAccessibilityService.ACTION_CONNECTED) {
-                status.text = "无障碍服务已连接"
+                if (!requestInFlight) status.text = "无障碍服务已连接"
             } else {
                 status.text = "有待处理任务，请点击“载入最新通知”后检查"
             }
@@ -55,6 +56,8 @@ class MainActivity : Activity() {
             val intent = intentInput.text.toString().trim()
             if (intent.isEmpty()) { status.text = "请输入任务意图"; return@setOnClickListener }
             run.isEnabled = false
+            requestInFlight = true
+            status.text = "本地模型首次加载或推理中，请稍候"
             executor.execute {
                 try {
                     val service = TarsAccessibilityService.instance
@@ -76,7 +79,10 @@ class MainActivity : Activity() {
                     }
                     runOnUiThread { status.text = output.joinToString("\n") }
                 } catch (e: Exception) { runOnUiThread { status.text = "请求失败: ${e.message}" } }
-                finally { runOnUiThread { run.isEnabled = true } }
+                finally {
+                    requestInFlight = false
+                    runOnUiThread { run.isEnabled = true }
+                }
             }
         }
         authorizeShizuku.setOnClickListener {

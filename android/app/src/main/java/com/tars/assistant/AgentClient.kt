@@ -27,7 +27,7 @@ class AgentClient(private val baseUrl: String = "http://127.0.0.1:8080") {
         val conn = (URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = 5_000
-            readTimeout = 120_000
+            readTimeout = MODEL_REQUEST_TIMEOUT_MS
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
             doInput = true
             if (payload != null) {
@@ -44,6 +44,8 @@ class AgentClient(private val baseUrl: String = "http://127.0.0.1:8080") {
 
     companion object {
         private const val AGENT_PORT = 8080
+        // Covers the cloud model request budget plus the local Agent response overhead.
+        private const val MODEL_REQUEST_TIMEOUT_MS = 210_000
         private val LOOPBACK_HOSTS = setOf("127.0.0.1", "::1", "[::1]")
     }
 }

@@ -5,11 +5,11 @@
 
 ## 1. 概述
 
-本地 AI 手机助手：数据不出设备。核心原则：**事件驱动、协议先行、LLM 输出不可信、安全兜底**。
+AI 手机助手：核心原则：**事件驱动、协议先行、LLM 输出不可信、安全兜底**。
 
-- 目标设备：Android（Termux + proot-distro Ubuntu 承载 Python 栈与本地推理）
+- 目标设备：Android（裸 Termux + venv 承载 Python Agent）；云端仅提供模型 API
 - 开发环境：Windows + ADB + Android Studio AVD
-- 感知：纯文本 UI 树（非视觉）；模型：Qwen2.5-3B 起步，预留 7B
+- 感知：纯文本 UI 树（非视觉）；模型：云端 OpenAI-compatible 模型，经私有配置选择
 
 ## 2. 系统架构
 
@@ -28,12 +28,11 @@
 │  │ Shizuku server (系统权限)  │◀───────────────│ ui_summarizer     │ │
 │  │ input tap/swipe/text     │                │ llm_client        │ │
 │  └──────────────────────────┘                └─────────┬─────────┘ │
-│                                             ┌─────────▼─────────┐ │
-│                                             │ llama-server      │ │
-│                                             │ Qwen2.5-3B GGUF   │ │
-│                                             └───────────────────┘ │
 └──────────────────────────────────────────────┘
 ```
+
+Agent 经 HTTPS 调用云端模型 API。云端不直接接收 Android UI、不会执行动作，也不承载 Agent 的
+schema 校验或安全策略。
 
 ## 3. 组件职责
 
@@ -44,8 +43,7 @@
 | Agent 服务 | HTTP 门面：路由请求、调用决策循环、返回动作 | `agent/server.py` |
 | 安全 Agent 循环 | 思考→行动→观察；强制结构化 JSON 输出 + schema 校验；当前为自研实现 | `agent/agent_loop.py` |
 | ui_summarizer | 原始 UI 树 XML → 紧凑交互节点列表（≤500 token） | `agent/ui_summarizer.py` |
-| llm_client | llama-server 封装（OpenAI 兼容），可 mock | `agent/llm_client.py` |
-| llama-server | 本地推理端点（/v1/chat/completions） | `scripts/start_llama.sh` |
+| llm_client | 云端 OpenAI-compatible 模型客户端，可 mock | `agent/llm_client.py` |
 
 ## 4. 运行时数据流（一次任务）
 
@@ -72,7 +70,7 @@
 | `/agent/run` | POST | 主入口：一次任务（可含多轮动作，状态由 session_id 维系） |
 | `/health` | GET | 存活检查（原生 App 联调用） |
 
-- 仅监听 `127.0.0.1`（Termux 本地回环），不暴露局域网；Android 客户端固定为 `http://127.0.0.1:8080`（Manifest 为此受限 loopback 用途启用 cleartext，客户端拒绝任何非 loopback endpoint）。服务应以 `python -m agent.server` 启动：`--mock` 仅做协议联调，默认模式接本地 llama-server。
+- 仅监听 `127.0.0.1`（Termux 本地回环），不暴露局域网；Android 客户端固定为 `http://127.0.0.1:8080`（Manifest 为此受限 loopback 用途启用 cleartext，客户端拒绝任何非 loopback endpoint）。服务应以 `python -m agent.server` 启动：`--mock` 仅做协议联调，默认模式经 HTTPS 调用云端模型。
 - `Content-Type: application/json`，UTF-8
 - 未知字段忽略；必填字段缺失或非法 → 400 + 结构化错误
 
@@ -208,35 +206,22 @@ UI 采集方案（阶段 4 在 AVD 实测后定，倾向 A，但均在原生 App
 2. **动作白名单**（原生 App 端）：高权限动作类型 + 目标应用白名单
 3. **关键操作确认**（双层）：Python 按目标 UI 文本将支付/删除/发送等敏感 click 强制标为 `requires_confirmation=true`；原生 App 以当前节点文本再次判定并弹窗确认，不能信任 LLM 给出的 false
 
-## 8. 模型层与升级路径
+## 8. 云端模型层
 
 当前 `agent/agent_loop.py` 是自研的 SmolAgent 风格循环，项目尚未安装或导入 `smolagents`
 Python 包。后续可将其作为 Python 决策层的编排实现，但不改变本协议或削弱 §7.2 的安全边界。
 
-- 推理端点：llama-server（OpenAI 兼容 `/v1/chat/completions`）
-- 模型档位（`agent/config.yaml`）：
-  - `default`: Qwen2.5-3B-Instruct Q4_K_M（约 2GB，8K 上下文）
-  - `optional`: Qwen2.5-7B-Instruct Q4（约 4GB，需 ≥8GB RAM 手机）
-- llm_client 以 `base_url` + `model_name` 配置化接入 → 换 7B 只改配置不改代码
-- 注意：Qwen2.5 系列**非多模态**；截图视觉理解列为二期，需换 Qwen2.5-VL 一族（届时感知层加截图通道）
-
-### 8.1 llama-server 生命周期：按需拉起
-
-决策 **D5 = 按需拉起**（2026-08-18 与用户确认）：不为省内存长期常驻，也不用每次冷启动。
-
-| 阶段 | 触发 | 说明 |
-|------|------|------|
-| 拉起 | Agent 收到新任务时 | 若 llama-server 未运行，则 spawn 并等其就绪（加载模型 1–3s） |
-| 保活 | 任务多轮循环期间 | 任务进行中保持存活，多轮决策复用同一实例 |
-| 退出 | 任务结束 + 空闲超时 | 空闲超时（默认 60s）后自动退出释放内存 |
-
-收益：空闲时手机零模型内存占用（解放约 2GB）；任务期才占内存，首轮决策多付一次加载延迟（1–3s），换来低频事件驱动场景下的最佳内存/体验平衡。进程管理由 `scripts/start_llama.sh` + agent 服务协同实现。
+- 推理端点：云端 OpenAI-compatible `/v1/chat/completions`。
+- 私有配置：`config/cloud.yaml`，由 `config/cloud.yaml.example` 初始化并被 Git 忽略。
+- `llm_client` 以 `base_url`、`model`、`api_key` 配置化接入；切换服务商或模型不改 Agent 代码。
+- 手机不安装或运行 GGUF、llama.cpp、llama-server；Termux 只承载 Python Agent。
+- 云端返回内容仍是不可信输入，必须经 Agent schema 校验与 Android 执行安全层。
 
 ## 9. 部署拓扑
 
 | 环境 | 用途 | 说明 |
 |------|------|------|
-| Windows | 开发/单测 | agent + bridge 全量可测（LLM mock）；llama-server 跑 x86 版验证推理；Kotlin 代码 Gradle 编译 |
+| Windows | 开发/单测 | agent + bridge 全量可测（LLM mock）；Kotlin 代码 Gradle 编译 |
 | AVD | 集成测试 | **系统镜像：Google APIs**（Shizuku/无障碍授权最顺，贴近真机）；`shizuku_starter.sh` 启动 |
 | 实体机 | 生产 | **裸 Termux + venv**（决策层 Python）；**原生 App**（执行侧，安装 APK）；Shizuku + 无线调试授权 |
 
@@ -244,8 +229,9 @@ Python 包。后续可将其作为 Python 决策层的编排实现，但不改�
 
 ## 10. 开放问题（阶段推进中逐项关闭）
 
+- [x] 模型常见的纯数字字符串节点 ID 在 Agent 侧按当前 UI 快照做受限规范化；非数字、未知节点 ID 仍由 schema 拒绝
 - [ ] UI 采集方案 A/B 实测定夺（§6，原生 App 内完成的两种取树方式）
 - [ ] 每轮执行后是否都重采 UI（观察频率与成本实测）
 - [ ] 常驻唤醒词：二期评估（受 Android 权限硬约束，D11 已排除一期）
 - [ ] 会话历史由原生 App 回传（history 字段）还是服务端缓存（session_id）——倾向服务端缓存，减小请求体
-- [ ] `start_llama.sh` 空闲超时阈值实测标定（默认 60s，见 §8.1）
+- [ ] 云端模型服务商的超时、额度与失败重试策略实测标定

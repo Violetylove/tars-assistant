@@ -9,6 +9,7 @@ from agent.ui_summarizer import summarize_xml, to_llm_prompt
 from agent.llm_client import MockLLM, extract_json
 from agent.agent_loop import decide_once, run_decision_loop
 from agent import server
+from agent.cloud_config import load_cloud_config
 
 # --- 夹具：UIAutomator 格式 XML ---
 
@@ -91,6 +92,22 @@ def test_decide_once_valid_action():
     assert resp["actions"][0]["type"] == "click"
     assert resp["actions"][0]["target_node_id"] == 1
     assert resp["need_observation"] is True
+
+
+def test_decide_once_normalizes_a_known_quoted_node_id():
+    llm = MockLLM(script=[lambda: json.dumps({"type": "click", "target_node_id": "1"})])
+    resp = decide_once(llm=llm, session_id="s1", intent="点击发送", ui_xml=SIMPLE_XML)
+    assert resp["actions"] == [{"type": "click", "target_node_id": 1, "requires_confirmation": True}]
+
+
+@pytest.mark.parametrize("target_node_id", ["button", " 1", "1.0", "999"])
+def test_decide_once_rejects_ambiguous_or_unknown_quoted_node_id(target_node_id):
+    llm = MockLLM(script=[lambda: json.dumps({"type": "click", "target_node_id": target_node_id})])
+    resp = decide_once(
+        llm=llm, session_id="s1", intent="点击发送", ui_xml=SIMPLE_XML, max_retries=0,
+    )
+    assert resp["actions"] == []
+    assert "schema 校验" in resp["reply"]
 
 
 def test_decide_once_marks_sensitive_click_for_confirmation():
@@ -198,7 +215,19 @@ def test_server_configure_mock_runtime_runs_a_valid_response():
     })
     assert response["done"] is True
     assert response["actions"] == []
-    assert response["reply"] == "协议联调完成（mock，未调用本地模型）"
+    assert response["reply"] == "协议联调完成（mock，未调用云端模型）"
+
+
+def test_server_accepts_loopback_agent_request_without_cloud_model_token():
+    srv = _fresh_server()
+    srv.configure_runtime(mock=True)
+    client = TestClient(srv.app)
+    r = client.post("/agent/run", json={
+        "protocol_version": "1.0",
+        "session_id": "model-not-ready",
+        "intent": "普通任务",
+    })
+    assert r.status_code == 200
 
 
 def test_server_accepts_request_without_ui_tree_in_mock_mode():
@@ -233,3 +262,23 @@ def test_server_routes_english_open_settings_skill_without_model():
     })
     assert response["done"] is True
     assert response["actions"] == [{"type": "launch", "package_name": "com.android.settings"}]
+
+
+def test_cloud_config_rejects_placeholder_values(tmp_path):
+    config = tmp_path / "cloud.yaml"
+    config.write_text("llm: {base_url: 'https://api.example.com/v1'}\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_cloud_config(config)
+
+
+def test_cloud_config_loads_https_provider_settings(tmp_path):
+    config = tmp_path / "cloud.yaml"
+    config.write_text(
+        "llm:\n  base_url: 'https://api.example.com/v1'\n  model: 'provider-model'\n"
+        "  api_key: 'provider-secret-key'\n  timeout_seconds: 90\n",
+        encoding="utf-8",
+    )
+    loaded = load_cloud_config(config)
+    assert loaded.base_url == "https://api.example.com/v1"
+    assert loaded.model == "provider-model"
+    assert loaded.timeout_seconds == 90

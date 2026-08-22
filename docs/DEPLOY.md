@@ -1,86 +1,80 @@
 # 部署与联调
 
-## 1. 前提
+## 架构边界
 
-- Android 执行侧与 Agent 必须运行在**同一台 Android 设备**。
-- Agent 仅监听 `127.0.0.1:8080`；不要用 `adb reverse`、局域网 IP 或公网端点替代。
-- 当前低配 AVD（2 GB RAM）仅用于权限、通知和 HTTP 协议联调。真实 3B 模型应在至少 6 GB RAM
-  的高配 AVD 或目标真机验证。
+- Android 原生 App：采集 UI、调用本机 Agent、执行已校验动作。
+- Termux Python Agent：自研安全决策循环、UI 摘要、schema 校验和固定技能路由。
+- 云端：只提供 OpenAI-compatible 大模型 API；不托管 TARS Agent，也不直接调用 Android。
 
-## 2. Windows 开发校验
+Android 与 Agent 固定为同一设备上的 `http://127.0.0.1:8080`。Agent 调云端模型必须使用 HTTPS。
 
-```powershell
-.venv\Scripts\python.exe -m pytest agent bridge -q
-cd android
-$env:GRADLE_USER_HOME = "$env:USERPROFILE\.gradle"
-gradle :app:assembleDebug --console=plain
+## 1. 云端模型私有配置
+
+在运行 Agent 的 Termux 中：
+
+```bash
+cd ~/tars-assistant
+mkdir -p config
+cp config/cloud.yaml.example config/cloud.yaml
 ```
 
-启动不依赖模型的协议服务：
+编辑 `config/cloud.yaml`：
 
-```powershell
-.venv\Scripts\python.exe -m agent.server --mock
-.venv\Scripts\python.exe scripts\smoke_agent.py
-```
+| 字段 | 填写内容 |
+|---|---|
+| `llm.base_url` | 服务商 OpenAI-compatible HTTPS 地址，通常以 `/v1` 结束 |
+| `llm.model` | 服务商模型 ID |
+| `llm.api_key` | 服务商 API Key，仅保留在此私有文件 |
+| `llm.timeout_seconds` | 云端请求上限；建议 60-120 秒 |
 
-`--mock` 只用于联调：它固定返回合法的无动作完成响应“协议联调完成（mock，未调用本地模型）”，
-绝不代表本地模型已运行。
+该文件被 Git 忽略。不要把 API Key 放入 Android 工程、APK、截图、日志或提交历史。
 
-## 3. AVD 基线
+## 2. Termux Agent
 
-1. 创建或选择 Google APIs x86_64 AVD，安装 `android/app/build/outputs/apk/debug/app-debug.apk`。
-2. 在系统 UI 中授权 TARS 无障碍服务、通知访问和麦克风权限。
-3. 从 Termux 官方 GitHub Release 安装与 AVD 架构匹配的 APK；发布文件须与官方 SHA-256 清单一致。
-
-### Shizuku 运行时来源
-
-- Shizuku 管理器统一使用 [`thedjchi/Shizuku`](https://github.com/thedjchi/Shizuku) 的 GitHub
-  Release；这是用户指定的维护分支，**不使用** `RikkaApps/Shizuku` 的管理器发布包。
-- 安装时固定 Release 标签，记录 APK 的 SHA-256、包名和 versionName；当前 AVD 基线为
-  `v13.7.0-thedjchi`，包名 `moe.shizuku.privileged.api`，SHA-256
-  `6EA6DEE65D5DDC626B6B75B2C2F67F8CC547FA47D7B437E6892639C37EAFFE43`。
-- Android App 继续使用 `dev.rikka.shizuku` 的 API/AIDL 依赖与 Shizuku 服务通信；管理器发行来源
-  的变更不放宽 App 的动作白名单、参数校验或用户授权边界。
-- AVD 没有已关联 Wi-Fi 时，Android 的无线调试配对不可用；使用 Shizuku 管理器“View command”
-  给出的**当前已安装包**启动命令，经已连接的 `adb shell` 执行。该命令的 APK 安装路径会变化，
-  不可写死到脚本或文档。设备重启后需重新启动 Shizuku。
-4. 在 Termux 中安装 Python 并复制项目源代码。低配 AVD 不下载 GGUF 模型。
-
-Termux 内的最小命令（高配 AVD 或真机）：
+Termux 保留，因为它承载项目的 Python 决策层；不再安装或运行 llama.cpp、GGUF 模型或本地模型服务。
 
 ```bash
 pkg update
-pkg install python git
+pkg install python git rust
 git clone https://gitee.com/violetylove/tars-assistant.git
 cd tars-assistant
 python -m venv .venv
 . .venv/bin/activate
-pip install -r requirements.txt
+PIP_NO_BUILD_ISOLATION=1 pip install -r requirements.txt
+cp config/cloud.yaml.example config/cloud.yaml
+python -m agent.server
+```
+
+Agent 只监听设备 loopback。启动后 Android App 的请求经 Agent 转发到云端模型，模型输出仍必须通过
+Python schema 校验与 Android 动作白名单、敏感操作确认。
+
+不配置云端 Key 时可执行协议联调：
+
+```bash
+. .venv/bin/activate
 python -m agent.server --mock
 python scripts/smoke_agent.py
 ```
 
-成功后，TARS Android App 的“发送给 TARS”应可访问同设备的 `127.0.0.1:8080`。先用 mock 模式
-验证 HTTP 及协议；再停止 mock 服务后进入下一节的真实模型模式。
+## 3. Android
 
-## 4. 真实模型模式
-
-1. 使用 `scripts/download_model.sh 3b` 下载默认 3B GGUF。
-2. 安装或构建与设备架构匹配的 `llama-server`，并确保它在 Termux 的 `PATH` 中。
-3. 启动 Agent，首次请求会按需拉起 llama-server：
-
-```bash
-. .venv/bin/activate
-python -m agent.server --llm-base-url http://127.0.0.1:11434/v1 --model qwen2.5:3b
+```powershell
+.venv\Scripts\python.exe -m pytest agent bridge -q
+cd android
+gradle :app:assembleDebug --console=plain
 ```
 
-真实模型响应仍必须经过 JSON schema 校验；Android 端仍执行动作白名单和敏感操作确认。模型服务
-未就绪时请求应安全失败，而不是降级为未标记的自动执行。
+安装 Debug APK 后，在系统设置中显式开启 TARS 无障碍服务；根据功能需要授予通知访问、麦克风和
+Shizuku 权限。Android App 只使用本机 loopback Agent，不能配置外部 URL。
 
-## 5. 验收顺序
+## 4. 清理旧本地模型
 
-1. `GET /health` 返回 `status=ok`。
-2. `scripts/smoke_agent.py` 在 mock 模式返回合法 `agent_response`。
-3. Android App 手动任务访问本机 Agent，确认没有 cleartext 或 endpoint 校验错误。
-4. 启动真实 llama-server 后复测一个非敏感动作。
-5. 涉及发送、删除、支付等 UI 节点时，确认 Android 二次弹窗仍出现。
+切换后可从设备的 Termux 中删除旧模型、模型服务二进制和诊断日志；不要删除 `~/tars-assistant` 或
+`.venv`，它们仍用于运行 Python Agent。具体命令见 `docs/AVD_TESTING.md` 的迁移记录。
+
+## 5. 验收
+
+1. 启动 Agent 后，`GET http://127.0.0.1:8080/health` 返回 `status=ok`。
+2. Android 发送固定技能，确认本机 loopback 与执行白名单正常。
+3. Android 发送非敏感任务，确认 Agent 调云端模型并返回通过 schema 的结果。
+4. 发送、删除、支付等敏感节点仍必须出现 Android 二次确认。

@@ -6,11 +6,12 @@ venv/
 *.egg-info/
 .pytest_cache/
 
-# Models (large, not committed)
+# Private deployment configuration (start from committed examples)
+config/cloud.yaml
+
+# Obsolete local-model artifacts may remain on developer machines but are never committed.
 models/
 *.gguf
-
-# Local binaries (llama.cpp etc., not committed)
 tools/
 
 # OS / editor
@@ -26,3 +27,6 @@ android/app/build/
 
 # Reasonix local runtime metadata and task cache
 .reasonix/
+
+# Runtime diagnostics
+.runtime/
