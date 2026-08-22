@@ -1,0 +1,10 @@
+{
+  "protocol_version": "1.0",
+  "session_id": "4f2a9c1e-7b3d-4a10-9c2e-111111111111",
+  "done": false,
+  "reply": "已定位到发送按钮",
+  "actions": [
+    { "type": "click", "target_node_id": 12, "requires_confirmation": false }
+  ],
+  "need_observation": true
+}

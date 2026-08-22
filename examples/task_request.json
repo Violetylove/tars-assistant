@@ -1,0 +1,9 @@
+{
+  "protocol_version": "1.0",
+  "session_id": "4f2a9c1e-7b3d-4a10-9c2e-111111111111",
+  "intent": "打开微信给张三发消息：今晚八点开会",
+  "app": "com.tencent.mm",
+  "activity": "com.tencent.mm.ui.LauncherUI",
+  "ui_xml": "<node text=\"微信\" clickable=\"true\" ...>",
+  "history": []
+}

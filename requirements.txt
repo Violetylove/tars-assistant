@@ -1,0 +1,11 @@
+# --- 阶段1: 通信契约 / 校验 ---
+jsonschema>=4.20
+PyYAML>=6.0
+
+# --- 阶段2: Agent 服务 ---
+# fastapi
+# uvicorn[standard]
+# smolagents
+
+# --- 阶段3: 推理层 ---
+# llama-cpp-python  (若用原生绑定；或仅依赖独立 llama-server，则无需此项)

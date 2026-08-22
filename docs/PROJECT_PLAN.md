@@ -27,9 +27,9 @@
 | 阶段 | 内容 | 状态 |
 |------|------|------|
 | 0 | 文档奠基（AGENTS.md / 计划书 / 设计书） | 🟢 已完成 |
-| 1 | 项目骨架 + 通信协议契约 | 🔵 进行中（契约定义） |
-| 2 | Agent 端：HTTP 服务 + UI 摘要器 + 决策循环 | ⚪ 未开始 |
-| 3 | 本地推理层：llama.cpp 接入 | ⚪ 未开始 |
+| 1 | 项目骨架 + 通信协议契约 | 🟢 已完成 |
+| 2 | Agent 端：HTTP 服务 + UI 摘要器 + 决策循环 | 🟢 已完成 |
+| 3 | 本地推理层：llama.cpp 接入 | 🔵 进行中 |
 | 4 | Tasker/Shizuku 执行端：感知与执行 | ⚪ 未开始 |
 | 5 | 端到端集成 + 演示技能 + 部署文档 | ⚪ 未开始 |
 
@@ -39,17 +39,17 @@
 - [x] docs/DESIGN.md（架构 + 协议契约，权威技术文档）
 
 ### 阶段 1：项目骨架 + 通信协议契约
-- [ ] 初始化 git 与目录结构（agent/ bridge/ tasker/ scripts/ docs/）
-- [ ] 定义并文档化 JSON Schema：`task_request` / `agent_response` / `action` / `ui_tree`（见 DESIGN.md §5）
-- [ ] 编写协议校验器 `bridge/validate.py` 与最小端到端 JSON 示例
+- [x] 初始化 git 与目录结构（agent/ bridge/ tasker/ scripts/ docs/）
+- [x] 定义并文档化 JSON Schema：`task_request` / `agent_response` / `action` / `ui_tree`（见 DESIGN.md §5）
+- [x] 编写协议校验器 `bridge/validate.py` 与最小端到端 JSON 示例
 - **验收**：schema 与示例 JSON 可被校验器解析通过（`python -m bridge.validate`）
 
 ### 阶段 2：Agent 端
-- [ ] `agent/server.py`：FastAPI 服务（/agent/run、/health）
-- [ ] `agent/ui_summarizer.py`：原始 UI 树 XML → 紧凑交互节点（≤500 token）
-- [ ] `agent/agent_loop.py`：SmolAgent 决策循环 + schema 校验兜底
-- [ ] `agent/config.yaml`：模型档位（3B 默认 / 7B 可选）、监听端口等
-- **验收**：mock UI 树 + 固定任务跑通 agent 返回合法 action JSON 的单测
+- [x] `agent/server.py`：FastAPI 服务（/agent/run、/health）
+- [x] `agent/ui_summarizer.py`：原始 UI 树 XML → 紧凑交互节点（≤500 token）
+- [x] `agent/agent_loop.py`：SmolAgent 决策循环 + schema 校验兜底
+- [~] `agent/config.yaml`：模型档位（3B 默认 / 7B 可选）、监听端口等 → **延后至阶段 3** 随 llama-server 接入一并落地（当前模型档位经 llm_client 参数注入）
+- **验收**：mock UI 树 + 固定任务跑通 agent 返回合法 action JSON 的单测（✅ 25 passed）
 
 ### 阶段 3：本地推理层（按需拉起）
 - [ ] 搭建开发虚环境（venv + requirements.txt，Windows 本地）
@@ -89,3 +89,5 @@
 |------|------|
 | 2026-08-18 | 创建文档体系；记录 D1–D4 决策、五阶段计划与验收标准 |
 | 2026-08-18 | 增订决策 D5（按需拉起）D6（HTTP 主干）D7（Termux:API 感知插件）D8（裸 Termux+venv 非 proot）D9（AVD 优先、Google APIs 镜像）；更新阶段 3/4/5 与风险与部署拓扑 |
+| 2026-08-18 | 阶段 1 完成：git init、四 JSON Schema、bridge/validate.py、示例；`python -m bridge.validate` 通过 |
+| 2026-08-18 | 阶段 2 完成：ui_summarizer / llm_client(mock) / agent_loop / server；25 单测全绿；config.yaml 延后至阶段 3 |
