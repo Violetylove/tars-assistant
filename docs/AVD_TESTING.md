@@ -64,3 +64,4 @@
 - Gmail 代理与安全回归：AVD 使用 `10.0.2.2:10000` 全局代理后仍可启动 Gmail；Shizuku 已启动并授权，真实动作到达 Android 后触发敏感确认，取消后安全停止，未发送邮件。
 - Gmail 自动表单回归：完整任务可由 Agent 自动启动 Gmail 并点击写邮件，收件人字段真实获得焦点；当前模型未在下一轮生成 `type`，因此不归因于输入执行层失败。
 - Agent 日志诊断：此前服务仅记录异常，无法判断 Gmail 多轮中是云端未返回 `type` 还是执行侧未发起下一轮；已补充安全元数据日志，重启 Termux Agent 后可按 session 追踪每轮 `actions`、`done` 与 `need_observation`。
+- Agent/执行层定位：设备日志确认同一 Gmail 会话实际返回 `home`、`click`、`click`、`type` 四轮动作；TARS 最终回执为 `执行失败: type`，故 Agent 规划链正常，阻塞在 Android 输入执行层。诊断 APK 已增加 `nodeFound/focused/setText` 与 Shizuku 回退日志并完成构建安装。

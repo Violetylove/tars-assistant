@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.graphics.Rect
 import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
+import android.util.Log
 
 class ActionExecutor(
     private val service: AccessibilityService,
@@ -60,10 +61,16 @@ class ActionExecutor(
             "click" -> findNode(action.targetNodeId)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
             "type" -> findNode(action.targetNodeId)?.let { node ->
                 val focused = node.isFocused || node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-                focused && (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
+                val setText = focused && node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
                     putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, action.text.orEmpty())
-                }) || shizuku.typeText(action.text.orEmpty()))
-            } == true
+                })
+                Log.i(TAG, "type target=${action.targetNodeId} class=${node.className} focused=$focused setText=$setText")
+                setText || shizuku.typeText(action.text.orEmpty())
+            }?.also { Log.i(TAG, "type target=${action.targetNodeId} nodeFound=true result=$it")
+            } ?: run {
+                Log.w(TAG, "type target=${action.targetNodeId} nodeFound=false")
+                false
+            }
             "back" -> service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
             "home" -> service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
             "launch" -> action.packageName?.let { packageName ->
@@ -117,6 +124,7 @@ class ActionExecutor(
     }
 
     companion object {
+        private const val TAG = "TarsAction"
         private val ALLOWED = setOf("click", "type", "swipe", "back", "home", "launch", "wait", "reply", "done")
         private val LAUNCHABLE_PACKAGES = setOf(
             "com.android.settings",
