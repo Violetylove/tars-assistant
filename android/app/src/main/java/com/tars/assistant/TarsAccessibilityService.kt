@@ -6,11 +6,17 @@ import android.view.accessibility.AccessibilityNodeInfo
 
 class TarsAccessibilityService : AccessibilityService() {
     private var floatingVoiceOverlay: FloatingVoiceOverlay? = null
+    @Volatile private var foregroundPackage: String? = null
+    @Volatile private var foregroundActivity: String? = null
     override fun onServiceConnected() {
         instance = this
         sendBroadcast(android.content.Intent(ACTION_CONNECTED).setPackage(packageName))
     }
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) { /* UI is pulled on demand. */ }
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        // Preserve the latest foreground context for the next Agent request; UI remains pulled on demand.
+        event?.packageName?.toString()?.takeIf { it.isNotBlank() }?.let { foregroundPackage = it }
+        event?.className?.toString()?.takeIf { it.isNotBlank() }?.let { foregroundActivity = it }
+    }
     override fun onInterrupt() = Unit
 
     override fun onDestroy() {
@@ -22,7 +28,27 @@ class TarsAccessibilityService : AccessibilityService() {
 
     fun currentUiXml(): String = rootInActiveWindow?.let { UiTreeXml.serialize(it) } ?: ""
 
-    fun execute(actions: List<AgentAction>, confirm: (AgentAction) -> Boolean = { false }): List<String> =
+    fun currentAppPackage(): String? = foregroundPackage
+
+    fun currentActivity(): String? = foregroundActivity
+
+    /** Poll the root window until it differs from the pre-action UI snapshot. */
+    fun awaitFreshUiAfter(previousUiXml: String, timeoutMs: Long): Boolean {
+        val deadline = android.os.SystemClock.elapsedRealtime() + timeoutMs
+        while (android.os.SystemClock.elapsedRealtime() < deadline) {
+            val currentUiXml = currentUiXml()
+            if (currentUiXml.isNotBlank() && currentUiXml != previousUiXml) return true
+            try {
+                Thread.sleep(OBSERVATION_POLL_MS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return false
+            }
+        }
+        return false
+    }
+
+    fun execute(actions: List<AgentAction>, confirm: (AgentAction) -> Boolean = { false }): ActionExecutor.ExecutionSummary =
         ActionExecutor(this, confirm).execute(actions)
 
     fun toggleFloatingVoice(): Boolean {
@@ -40,6 +66,7 @@ class TarsAccessibilityService : AccessibilityService() {
     companion object {
         const val ACTION_CONNECTED = "com.tars.assistant.ACCESSIBILITY_CONNECTED"
         @Volatile var instance: TarsAccessibilityService? = null
+        private const val OBSERVATION_POLL_MS = 100L
     }
 }
 

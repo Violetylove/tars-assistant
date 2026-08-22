@@ -65,17 +65,28 @@ class MainActivity : Activity() {
                     val sessionId = java.util.UUID.randomUUID().toString()
                     val output = mutableListOf<String>()
                     for (round in 0 until MAX_OBSERVATION_ROUNDS) {
+                        val uiXml = service?.currentUiXml().orEmpty()
                         val response = client.run(TaskRequest(
                             intent = intent,
-                            uiXml = service?.currentUiXml(),
+                            app = service?.currentAppPackage(),
+                            activity = service?.currentActivity(),
+                            uiXml = uiXml,
                             sessionId = sessionId,
                             history = history,
                         ))
                         if (response.reply.isNotBlank()) output += response.reply
-                        val execution = service?.execute(response.actions, ::confirmAction) ?: listOf("无障碍服务未连接")
-                        output += execution
+                        val execution = service?.execute(response.actions, ::confirmAction)
+                            ?: ActionExecutor.ExecutionSummary(listOf("无障碍服务未连接"), completed = false)
+                        output += execution.messages
+                        if (!execution.completed) break
                         history.put(JSONObject().put("actions", response.actions.toJsonArray()))
                         if (response.done || !response.needObservation || response.actions.isEmpty()) break
+                        if (service == null || !service.awaitFreshUiAfter(
+                                uiXml, OBSERVATION_TIMEOUT_MS,
+                            )) {
+                            output += "未观察到界面更新，已停止任务"
+                            break
+                        }
                     }
                     runOnUiThread { status.text = output.joinToString("\n") }
                 } catch (e: Exception) { runOnUiThread { status.text = "请求失败: ${e.message}" } }
@@ -203,6 +214,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val MAX_OBSERVATION_ROUNDS = 4
+        private const val OBSERVATION_TIMEOUT_MS = 2_000L
         private const val FIFTEEN_MINUTES_MS = 15 * 60 * 1000L
         private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 1002
         private const val MICROPHONE_PERMISSION_REQUEST_CODE = 1003

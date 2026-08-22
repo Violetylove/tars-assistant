@@ -35,8 +35,18 @@ SYSTEM_PROMPT = (
 _SENSITIVE_LABELS = ("发送", "删除", "清除", "支付", "付款", "转账", "send", "delete", "pay")
 
 
-def _build_user_message(intent: str, nodes: list[dict], history: list[dict]) -> str:
+def _build_user_message(
+    intent: str,
+    nodes: list[dict],
+    history: list[dict],
+    app: Optional[str] = None,
+    activity: Optional[str] = None,
+) -> str:
     segs = [f"用户意图：{intent}", "当前屏幕节点：", to_llm_prompt(nodes)]
+    if app:
+        segs.insert(1, f"当前前台应用包名：{app}")
+    if activity:
+        segs.insert(2 if app else 1, f"当前前台窗口类名：{activity}")
     if history:
         segs.append("前面的动作/观察：")
         segs.extend(json.dumps(h, ensure_ascii=False) for h in history)
@@ -110,6 +120,8 @@ def decide_once(
     intent: str,
     ui_xml: str,
     history: Optional[list[dict]] = None,
+    app: Optional[str] = None,
+    activity: Optional[str] = None,
     max_retries: int = 1,
 ) -> dict:
     """单轮决策：摘要 + 调 LLM + 净化 + schema 校验。返回合法 agent_response。
@@ -118,7 +130,7 @@ def decide_once(
     reply=错误说明 + 空 actions（安全拒绝，不抛异常）。
     """
     nodes = summarize_xml(ui_xml)
-    user_msg = _build_user_message(intent, nodes, history or [])
+    user_msg = _build_user_message(intent, nodes, history or [], app=app, activity=activity)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_msg},
@@ -195,6 +207,8 @@ def run_decision_loop(
     session_id: str,
     intent: str,
     ui_xml: str,
+    app: Optional[str] = None,
+    activity: Optional[str] = None,
     max_steps: int = 4,
     on_step: Optional[callable] = None,
 ) -> dict:
@@ -208,7 +222,7 @@ def run_decision_loop(
     for _ in range(max_steps):
         resp = decide_once(
             llm=llm, session_id=session_id, intent=intent,
-            ui_xml=current_xml, history=history,
+            ui_xml=current_xml, history=history, app=app, activity=activity,
         )
         if on_step:
             on_step(resp)

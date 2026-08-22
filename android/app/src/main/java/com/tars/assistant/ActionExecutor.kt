@@ -10,15 +10,30 @@ class ActionExecutor(
     private val confirm: (AgentAction) -> Boolean,
     private val shizuku: ShizukuGateway = ShizukuGateway(),
 ) {
-    fun execute(actions: List<AgentAction>): List<String> {
+    data class ExecutionSummary(val messages: List<String>, val completed: Boolean)
+
+    fun execute(actions: List<AgentAction>): ExecutionSummary {
         val results = mutableListOf<String>()
         for (action in actions) {
-            if (action.type !in ALLOWED) { results += "拒绝未知动作: ${action.type}"; continue }
-            if (!wellFormed(action)) { results += "拒绝参数不完整: ${action.type}"; continue }
-            if (requiresConfirmation(action) && !confirm(action)) { results += "等待确认: ${action.type}"; continue }
-            results += if (executeOne(action)) "已执行: ${action.type}" else "执行失败: ${action.type}"
+            if (action.type !in ALLOWED) {
+                results += "拒绝未知动作: ${action.type}"
+                return ExecutionSummary(results, completed = false)
+            }
+            if (!wellFormed(action)) {
+                results += "拒绝参数不完整: ${action.type}"
+                return ExecutionSummary(results, completed = false)
+            }
+            if (requiresConfirmation(action) && !confirm(action)) {
+                results += "已取消: ${action.type}"
+                return ExecutionSummary(results, completed = false)
+            }
+            if (!executeOne(action)) {
+                results += "执行失败: ${action.type}"
+                return ExecutionSummary(results, completed = false)
+            }
+            results += "已执行: ${action.type}"
         }
-        return results
+        return ExecutionSummary(results, completed = true)
     }
 
     private fun wellFormed(action: AgentAction): Boolean = when (action.type) {

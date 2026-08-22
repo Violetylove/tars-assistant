@@ -4,8 +4,11 @@
 
 - `AgentClient` 使用 `HttpURLConnection` 调用 `127.0.0.1:8080`
 - `TarsAccessibilityService` 采集当前无障碍树并序列化为 `ui_xml`
+- 无障碍事件提供最近前台应用包名和窗口类名，随每轮 `task_request` 一并回传给 Agent
 - 无障碍服务连接后会在主界面显示已连接状态
 - `ActionExecutor` 执行 click/type/back/home/wait；未知动作默认拒绝
+- 任一动作被拒绝、取消或失败时，执行侧立即停止该轮，不再下发后续动作或观察请求
+- 需要下一轮观察时，执行侧轮询直到动作后 UI XML 与原快照不同；2 秒内无更新则安全停止，避免传回陈旧或过渡 UI
 - `launch` 仅可启动系统设置、TARS Assistant 或微信；包名在 Agent 固定路由和 Android 执行侧均有白名单校验
 - `ShizukuGateway` 用官方 UserService + AIDL 执行参数受限的 `input swipe`，需用户显式授权
 - `VoiceIntentCapture` 使用原生 `SpeechRecognizer`；按住说话只填入任务意图，用户仍须检查并发送

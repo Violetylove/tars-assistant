@@ -94,10 +94,10 @@ Agent 经 HTTPS 调用云端模型 API，并发送任务文本与压缩后的 UI
 | protocol_version | string | 是 | 当前 "1.0" |
 | session_id | string | 是 | 一次任务的会话标识（原生 App 生成 UUID） |
 | intent | string | 是 | 用户意图（语音转文字/通知文本/定时任务描述） |
-| app | string | 否 | 当前前台应用包名 |
-| activity | string | 否 | 当前 Activity |
+| app | string | 否 | 无障碍事件记录的最近前台应用包名；服务刚连接或未收到事件时省略 |
+| activity | string | 否 | 无障碍事件记录的最近前台窗口类名；服务刚连接或未收到事件时省略 |
 | ui_xml | string | 否 | 当前 UI 树原始 XML；未采集到 UI 树时可省略或传空字符串，Agent 按空节点安全决策；后续轮由 need_observation 驱动重采 |
-| history | array | 否 | 前序轮次的 action 与观察摘要（服务端亦可按 session_id 缓存） |
+| history | array | 否 | 原生侧回传的前序动作记录，最多 3 轮、每轮最多 8 个合法 action；服务端不缓存会话状态 |
 
 ### 5.3 `ui_tree`（Agent 内部结构，调试/执行用）
 
@@ -146,8 +146,8 @@ LLM 视角的紧凑行格式：`[12] 按钮"发送" (450,900)`——供 prompt �
 |------|------|------|------|
 | done | bool | 是 | true = 任务结束（reply 为最终答复） |
 | reply | string | 否 | 给用户的中间/最终文本 |
-| actions | array | 否 | 待执行动作列表（有序执行；为空表示无动作） |
-| need_observation | bool | 否 | true = 原生 App 执行后须重采 UI 树回传（进入下一轮） |
+| actions | array | 否 | 待执行动作列表（有序执行；最多 8 个；为空表示无动作） |
+| need_observation | bool | 否 | true = 原生 App 执行后轮询直至 UI XML 与动作前快照不同，再重采回传（进入下一轮）；2 秒内无更新则安全停止 |
 
 ### 5.5 `action` 类型
 
@@ -188,10 +188,11 @@ LLM 视角的紧凑行格式：`[12] 按钮"发送" (450,900)`——供 prompt �
   3. **排序**：按 bounds 从上到下、从左到右
 - 输出：紧凑行文本（喂 LLM）+ 结构化 nodes（供执行引用 id）
 - 验收基线：单屏摘要 ≤ 500 token，以控制云端请求体与延迟
+- 原生侧在无障碍事件中保存最近前台应用包名和窗口类名，并与同轮 UI 树一起作为可选 `task_request.app`、`activity` 传给 Agent。Agent 将其作为提示词中的辅助上下文；动作目标仍必须来自当前 UI 节点并通过 §7.2 安全校验。
 
-UI 采集方案（阶段 4 在 AVD 实测后定，倾向 A，但均在原生 App 内完成，非独立工具）：
-- **方案 A（推荐）**：原生 App 经 Shizuku 执行 `uiautomator dump` 导出完整 XML（含 bounds），App 读文件并回传
-- 方案 B：原生无障碍服务直接取节点树（`AccessibilityNodeInfo`），元素完整、bounds 可得但不含部分扩展属性，传输更轻可控
+UI 采集方案（D2，AVD 实测后已定）：
+- **方案 B（已选）**：原生无障碍服务直接遍历 `AccessibilityNodeInfo`，序列化为 XML 并回传。跨应用系统设置实测可获得正确包名、可交互节点与 bounds；它不依赖 Shizuku 文件导出，权限和失败面更小。
+- 方案 A（备用）：原生 App 经 Shizuku 执行 `uiautomator dump` 后读取完整 XML。仅在未来确有无障碍树不提供的属性、且经独立风险评估后启用；不作为当前主路径。
 
 ## 7. 执行层与安全设计
 
@@ -209,6 +210,11 @@ UI 采集方案（阶段 4 在 AVD 实测后定，倾向 A，但均在原生 App
 1. **Schema 校验**（Agent 端）：非法 action 一律拒绝，不执行
 2. **动作白名单**（原生 App 端）：高权限动作类型 + 目标应用白名单
 3. **关键操作确认**（双层）：Python 按目标 UI 文本将支付/删除/发送等敏感 click 强制标为 `requires_confirmation=true`；原生 App 以当前节点文本再次判定并弹窗确认，不能信任 LLM 给出的 false
+4. **失败即收敛**（原生 App 端）：任一动作被拒绝、用户取消或执行失败时，停止本轮余下动作且不发起下一轮观察；只有整轮动作成功才写入 history 并继续决策
+5. **观察新鲜度**（原生 App 端）：多轮动作前保存 UI XML，只有动作后根节点导出的 UI XML 与原快照不同才采集下一轮；2 秒超时则停止，避免把陈旧或过渡界面交给模型
+6. **历史边界**（协议层）：history 只接受有限的、通过 action schema 校验的已执行动作记录，避免任意对象进入云端提示词
+7. **响应关联**（Agent 服务端）：固定技能和决策后端的 `agent_response` 均须在返回 Android 前重做 schema 校验，且 `session_id` 必须与本次请求一致
+8. **动作数量边界**（协议层）：单次 `agent_response.actions` 最多 8 个，与单轮 history 记录上限一致，避免一次响应执行无界动作序列
 
 ## 8. 云端模型层
 
@@ -235,8 +241,8 @@ Python 包。后续可将其作为 Python 决策层的编排实现，但不改�
 ## 10. 开放问题（阶段推进中逐项关闭）
 
 - [x] 模型常见的纯数字字符串节点 ID 在 Agent 侧按当前 UI 快照做受限规范化；非数字、未知节点 ID 仍由 schema 拒绝
-- [ ] UI 采集方案 A/B 实测定夺（§6，原生 App 内完成的两种取树方式）
-- [ ] 每轮执行后是否都重采 UI（观察频率与成本实测）
+- [x] UI 采集方案 A/B 实测定夺：选定方案 B（无障碍 `AccessibilityNodeInfo` 直接序列化）；AVD 跨应用系统设置实测可获得包名、可交互节点和 bounds，无需 Shizuku 文件导出
+- [x] 每轮执行后仅在 UI XML 实际变化后重采（AVD 两轮系统设置探针验证；2 秒无变化安全停止）
 - [ ] 常驻唤醒词：二期评估（受 Android 权限硬约束，D11 已排除一期）
-- [ ] 会话历史由原生 App 回传（history 字段）还是服务端缓存（session_id）——倾向服务端缓存，减小请求体
+- [x] 会话历史由原生 App 回传：最多四轮决策，历史最多三轮且只含已执行的合法 action；Agent 保持无状态，重启不会残留任务上下文
 - [ ] 云端模型服务商的超时、额度与失败重试策略实测标定

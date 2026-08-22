@@ -96,6 +96,16 @@ def health() -> dict:
     return {"status": "ok", "protocol_version": PROTOCOL_VERSION}
 
 
+def _validate_response_for_request(resp: dict, session_id: str) -> dict:
+    """Reject malformed or cross-session decisions before returning them to Android."""
+    if resp.get("session_id") != session_id:
+        raise ValueError("agent_response session_id 与请求不一致")
+    errs = validate(resp, "agent_response")
+    if errs:
+        raise ValueError("agent_response 校验失败: " + "; ".join(errs[:5]))
+    return resp
+
+
 @app.post("/agent/run")
 def agent_run(req: dict) -> dict:
     # 契约校验：非法请求直接 400（决策层不处理不可信输入）
@@ -103,18 +113,19 @@ def agent_run(req: dict) -> dict:
     if errs:
         raise HTTPException(status_code=400, detail=f"task_request 校验失败: {'; '.join(errs[:5])}")
 
-    fixed_response = route_fixed_skill(session_id=req["session_id"], intent=req["intent"])
-    if fixed_response is not None:
-        return fixed_response
-
     try:
+        fixed_response = route_fixed_skill(session_id=req["session_id"], intent=req["intent"])
+        if fixed_response is not None:
+            return _validate_response_for_request(fixed_response, req["session_id"])
         resp = decision_fn(
             session_id=req["session_id"],
             intent=req["intent"],
             ui_xml=req.get("ui_xml", ""),
             history=req.get("history"),
+            app=req.get("app"),
+            activity=req.get("activity"),
         )
-        return resp
+        return _validate_response_for_request(resp, req["session_id"])
     except Exception as exc:  # LLM 网络/服务异常 → 50x（Tasker 可重试）
         logger.exception("决策失败")
         raise HTTPException(status_code=502, detail=f"决策服务异常: {exc}") from exc

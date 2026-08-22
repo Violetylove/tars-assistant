@@ -87,6 +87,18 @@ _COMMON_DEFS = {
         "required": ["nodes"],
         "additionalProperties": False,
     },
+    "history_entry": {
+        "type": "object",
+        "properties": {
+            "actions": {
+                "type": "array",
+                "items": _ref("action"),
+                "maxItems": 8,
+            },
+        },
+        "required": ["actions"],
+        "additionalProperties": False,
+    },
 }
 
 
@@ -112,7 +124,11 @@ SCHEMAS = {
             "app": {"type": "string"},
             "activity": {"type": "string"},
             "ui_xml": {"type": "string"},
-            "history": {"type": "array", "items": {"type": "object"}},
+            "history": {
+                "type": "array",
+                "items": _ref("history_entry"),
+                "maxItems": 3,
+            },
         },
         "required": [
             "protocol_version",
@@ -120,6 +136,7 @@ SCHEMAS = {
             "intent",
         ],
         "additionalProperties": False,
+        "$defs": _COMMON_DEFS,
     },
     "agent_response": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -136,6 +153,7 @@ SCHEMAS = {
             "actions": {
                 "type": "array",
                 "items": _ref("action"),
+                "maxItems": 8,
             },
             "need_observation": {"type": "boolean"},
         },

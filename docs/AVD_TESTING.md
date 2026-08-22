@@ -27,6 +27,11 @@
 9. [x] 输入 `open settings` 并发送；Termux Agent 返回 HTTP 200，Android 仅经固定启动包名白名单将系统设置置于前台。
 10. [x] 同步 Agent 单动作 `reply` 收敛修复并重启 Termux 服务；真实云端无副作用请求返回 `done=true`、答复文本、空 `actions` 与 `need_observation=false`。
 11. [x] 同步云端重试实现并重启 Termux 服务；既有私有配置未增加字段时采用受限默认值，真实云端无副作用请求仍返回终态文本且无动作。
+12. [x] 重建并覆盖安装含前台上下文采集的 Debug APK；无障碍服务已绑定，且系统确认其订阅 `TYPE_WINDOW_STATE_CHANGED` 与 `TYPE_WINDOW_CONTENT_CHANGED`。
+13. [x] 同步前台上下文的 Agent 传递链路；真实云端无副作用请求根据 `app=com.android.settings` 仅回显该包名，返回终态空动作。
+14. [x] 重建并覆盖安装执行失败收敛修复版 Debug APK；模型定位 TARS 自身的敏感“发送给 TARS”按钮，确认弹窗取消后状态为“已取消: click”，Agent 仅记录一次请求且未进入下一轮观察。
+15. [x] 临时两轮探针首轮启动系统设置；第二轮使用同一 `session_id` 回传 `com.android.settings` 前台上下文、系统设置 UI XML 与首轮 `launch` history，随后已恢复真实云端 Agent。
+16. [x] 在绑定的无障碍服务下采集系统设置原始树，得到 21,695 字节 XML，含 `com.android.settings`、可交互节点和 bounds；正式选定无障碍直接序列化作为 UI 采集主路径。
 
 ## 已完成验收
 
@@ -41,3 +46,8 @@
 - 固定技能冒烟验收：当前 APK 发送 `open settings` 后，Termux 日志新增 `POST /agent/run 200`；AVD 前台窗口为 `com.android.settings/.Settings`。这同时验证了 App HTTP client、同设备 loopback、Python 固定路由与 Android 启动白名单。
 - 通用对话终态验收：同步 `agent_loop.py` 后重启 AVD Termux Agent；云端仅被要求返回一句文本，实际响应为终态 `reply`、空动作且无需观察。临时 ADB 转发已在测试结束后移除；未执行任何界面操作。
 - 云端可靠性部署验收：同步客户端、配置加载和服务启动模块后，旧版私有 `cloud.yaml` 未改动也可使用默认的最大 2 次重试与 1 秒初始退避。真实云端请求正常返回终态文本；模拟的超时、限流、服务错误和认证错误路径由本地单测覆盖。临时 ADB 转发已移除。
+- 前台上下文安装基线：当前 Debug APK 已安装至 AVD；`dumpsys accessibility` 显示 TARS 服务处于 Bound 状态，并订阅窗口状态与内容变化事件。跨应用任务将在第一步动作后的下一轮请求中使用最新的目标 UI 树与前台上下文；该多步路径留待后续受控任务验收。
+- 前台上下文端到端验收：同步 `agent_loop.py` 与 `server.py` 并重启 Termux Agent 后，传入系统设置包名及窗口类名的无副作用请求由真实云端仅答复 `com.android.settings`，响应为 `done=true`、空动作且无需观察。临时 ADB 转发已移除。
+- 执行失败收敛验收：当前 APK 包含逐动作结构化结果；取消、拒绝或失败会使执行结果标记为未完成，主循环在记录 history 和请求下一轮前立即停止。受控任务仅允许模型点击 TARS 自身的“发送给 TARS”按钮，确认弹窗出现后选择取消，最终状态为“已取消: click”；Termux 日志仅新增本轮一次 `POST /agent/run 200`，未产生后续观察请求。
+- UI 采集方案验收：在 TARS 无障碍服务已绑定时，跨应用系统设置原始树为 21,695 字节，含正确包名、可交互节点和 bounds。选定 `AccessibilityNodeInfo` 直接序列化（方案 B）为当前主路径；它无需 Shizuku 文件导出，方案 A 仅保留为未来受限备用。
+- 多轮观察验收：临时确定性 Termux 服务的第一轮只启动系统设置并请求观察；执行侧仅在当前 UI XML 与首轮快照不同后才发起第二轮。探针记录确认第二轮使用同一会话，含 `app=com.android.settings`、系统设置的原始 UI XML 与首轮 `launch` history；真实云端 Agent 已在测试结束后恢复。

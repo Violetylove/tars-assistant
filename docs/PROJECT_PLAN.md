@@ -66,11 +66,18 @@
 ### 阶段 4：原生执行侧 App（Kotlin，AVD 上开发）
 - [x] `android/`：Gradle 工程骨架（Kotlin + 原生 View）
 - [x] UI 采集：无障碍取当前 UI 树 → `task_request` 契约（复用已建 `bridge/` schema）
+- [x] UI 采集方案定夺：选定无障碍 `AccessibilityNodeInfo` 直接序列化；跨应用系统设置实测具备包名、可交互节点和 bounds，Shizuku `uiautomator dump` 仅保留为备用
 - [x] 无障碍状态：服务连接会回报到主界面，便于授权和联调诊断
 - [x] 动作执行：无障碍执行 click/type/back/home/wait；Shizuku 授权与参数受限的 swipe 已接入并在 AVD 验收
 - [x] HTTP client：调 Python 决策层 `POST /agent/run`、`GET /health`
+- [x] 前台上下文：无障碍事件采集最近前台应用包名和窗口类名，随每轮 UI 快照作为可选协议字段回传 Agent
 - [x] Android loopback HTTP 策略：明文 loopback 放行 + 客户端固定端点校验（AVD 已验证不再触发 cleartext 拦截）
 - [x] 安全层：动作白名单 + 参数/会话校验 + 双层敏感目标确认弹窗
+- [x] 执行失败收敛：动作被拒绝、取消或失败即停止同轮与后续观察，避免在未执行状态继续模型决策
+- [x] 多轮观察新鲜度：动作后仅在 UI XML 与动作前快照不同才采样；2 秒内未更新则停止，避免模型基于陈旧界面继续决策
+- [x] 多轮历史边界：原生侧回传最多三轮已执行的合法 action；协议拒绝任意对象和超量历史，Agent 保持无状态
+- [x] 服务端输出边界：固定技能与决策后端响应在返回 Android 前均重做 schema 与 session_id 校验，拒绝错配或非法动作
+- [x] 单轮动作数量边界：协议限制每个 `agent_response` 最多 8 个动作，避免无界执行序列
 - [x] **验收**：AVD 已完成 APK 安装/启动、服务声明、主界面、无障碍授权与绑定、loopback HTTP 策略、定时待处理链路、通知访问、Shizuku swipe 和设备内 Termux mock Agent 联调（见 `docs/AVD_TESTING.md`）
 
 ### 阶段 5：触发一期 + 端到端集成 + 部署
@@ -140,3 +147,11 @@
 | 2026-08-21 | Android 构建与 APK 同步复验：项目声明阿里云 Maven 镜像及官方仓库回退，以兼容机器级 Gradle 初始化脚本；无需代理即可完成全新 Debug 构建。当前 APK 已安装至 AVD，验证“载入待处理任务”文案；固定 `open settings` 经 App → Termux loopback → Python 固定路由 → Android 启动白名单打开系统设置。 |
 | 2026-08-21 | 通用对话终态修复：模型单对象 `reply` 被规范化为 `done=true` 的文本响应，不再作为 Android 可执行动作或触发后续观察；补充单轮及多轮循环回归测试，并在 AVD Termux 经真实云端无副作用请求复验。 |
 | 2026-08-21 | 云端模型可靠性：连接/超时、429 与 5xx 增加配置化有界指数退避重试（默认额外 2 次）；认证、其他 4xx 与无效响应立即失败，错误不含密钥。覆盖超时恢复、限流/服务错误恢复、认证不重试、耗尽重试与配置边界单测；AVD Termux 使用既有私有配置加载默认值并完成真实云端无副作用复验。 |
+| 2026-08-22 | 前台上下文补齐：Android 无障碍服务保存最近事件的前台应用包名与窗口类名，经 HTTP 服务写入 Agent 提示词；单测验证传递链路，AVD Termux 真实云端无副作用请求确认模型可使用该上下文。动作仍严格绑定当前 UI 节点和既有安全防线。 |
+| 2026-08-22 | 执行失败收敛：原生执行侧将动作结果结构化；拒绝、用户取消或执行失败会立即停止本轮余下动作并阻止后续观察，只有整轮成功才记录 history。AVD 以 TARS 自身发送按钮完成确认取消回归，日志确认仅有单次请求。 |
+| 2026-08-22 | 多轮观察新鲜度修复：AVD 两轮探针发现启动设置后过早重采仍为 TARS UI，且该窗口变化未必向无障碍服务交付事件；改为动作前保存 UI XML，仅在根节点导出的快照实际变化后才进入下一轮，2 秒超时 fail-closed。 |
+| 2026-08-22 | 多轮观察验收完成：修复版 APK 经临时两轮 Termux 探针启动系统设置；同一会话的第二轮实际回传 `com.android.settings` 上下文、系统设置 UI XML 和首轮 `launch` history。测试结束后恢复真实云端 Agent。 |
+| 2026-08-22 | UI 采集方案定夺：选定方案 B，无障碍服务直接序列化 `AccessibilityNodeInfo`。AVD 绑定服务下的系统设置原始树为 21,695 字节，具备正确包名、可交互节点与 bounds；方案 A（Shizuku `uiautomator dump`）保留为未来受限备用路径。 |
+| 2026-08-22 | 多轮历史边界：选定原生侧回传历史，避免 Agent 服务端状态；`task_request.history` 限制为最多三轮、每轮最多八个合法 action，拒绝任意对象和超量输入。 |
+| 2026-08-22 | Agent 服务输出边界：`/agent/run` 在返回 Android 前统一校验固定技能与决策后端的响应 schema，并拒绝与请求 session_id 不一致的结果。 |
+| 2026-08-22 | 单轮动作数量边界：`agent_response.actions` 与 history 中每轮动作统一限制为最多 8 个，协议单测覆盖超限拒绝。 |

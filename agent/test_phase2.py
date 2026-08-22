@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from agent.ui_summarizer import summarize_xml, to_llm_prompt
 from agent.llm_client import CloudRequestError, LLMClient, MockLLM, extract_json
-from agent.agent_loop import decide_once, run_decision_loop
+from agent.agent_loop import _build_user_message, decide_once, run_decision_loop
 from agent import server
 from agent.cloud_config import load_cloud_config
 
@@ -66,6 +66,15 @@ def test_to_llm_prompt_compact():
     assert "[0] input" in prompt
     assert "(400,250)" in prompt  # EditText 中心 x=(40+760)/2=400 y=(200+300)/2=250
     assert len(prompt.split()) <= 500
+
+
+def test_decision_prompt_includes_optional_foreground_context():
+    message = _build_user_message(
+        "查看设置", summarize_xml(SIMPLE_XML), [],
+        app="com.android.settings", activity="com.android.settings.Settings",
+    )
+    assert "当前前台应用包名：com.android.settings" in message
+    assert "当前前台窗口类名：com.android.settings.Settings" in message
 
 
 # ===== llm_client.extract_json =====
@@ -289,6 +298,50 @@ def test_server_run_with_mock_decision():
     body = r.json()
     assert body["done"] is True
     assert body["reply"] == "OK 已点击"
+
+
+def test_server_rejects_invalid_decision_response_before_returning_to_android():
+    srv = _fresh_server()
+    srv.decision_fn = lambda **kwargs: {
+        "protocol_version": "1.0", "session_id": kwargs["session_id"], "done": False,
+        "actions": [{"type": "inject", "payload": "untrusted"}],
+    }
+    client = TestClient(srv.app, raise_server_exceptions=False)
+    r = client.post("/agent/run", json={
+        "protocol_version": "1.0", "session_id": "invalid-response", "intent": "测试",
+    })
+    assert r.status_code == 502
+    assert "agent_response 校验失败" in r.json()["detail"]
+
+
+def test_server_rejects_decision_response_for_a_different_session():
+    srv = _fresh_server()
+    srv.decision_fn = lambda **_kwargs: {
+        "protocol_version": "1.0", "session_id": "other-session", "done": True,
+        "actions": [],
+    }
+    client = TestClient(srv.app, raise_server_exceptions=False)
+    r = client.post("/agent/run", json={
+        "protocol_version": "1.0", "session_id": "expected-session", "intent": "测试",
+    })
+    assert r.status_code == 502
+    assert "session_id 与请求不一致" in r.json()["detail"]
+
+
+def test_server_passes_foreground_context_to_decision_backend():
+    srv = _fresh_server()
+    captured = {}
+    srv.decision_fn = lambda **kwargs: captured.update(kwargs) or {
+        "protocol_version": "1.0", "session_id": kwargs["session_id"], "done": True,
+        "reply": "OK", "actions": [], "need_observation": False,
+    }
+    response = srv.agent_run({
+        "protocol_version": "1.0", "session_id": "foreground-context", "intent": "查看设置",
+        "app": "com.android.settings", "activity": "com.android.settings.Settings",
+    })
+    assert response["done"] is True
+    assert captured["app"] == "com.android.settings"
+    assert captured["activity"] == "com.android.settings.Settings"
 
 
 def test_server_configure_mock_runtime_runs_a_valid_response():
