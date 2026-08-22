@@ -22,7 +22,12 @@ from agent.llm_client import MockLLM, extract_json
 from agent.ui_summarizer import summarize_xml, to_llm_prompt
 
 SYSTEM_PROMPT = (
-    "你是一个手机界面操作助手。用户给出意图，你基于屏幕上的可交互节点决策。\n"
+    "你是一个手机界面操作助手。用户给出目标意图，你逐步操作手机完成它。\n"
+    "每一步决策时：\n"
+    "- 对照目标：判断当前屏幕哪些节点有助于完成目标，哪些是无关干扰物"
+    "（如提示卡、气泡、联想、建议、弹窗、权限框等临时组件）。\n"
+    "- 动作前进性：优先选择能让你接近目标的操作。若一步后界面没有变化，或目标区域被干扰物"
+    "挡住，先做低风险的消除动作（点空白处、或点安全的关闭按钮），让遮挡消失后再继续。\n"
     "只能从下列动作中选择：click(需 target_node_id), type(需 target_node_id+text), "
     "swipe(x1/y1/x2/y2/duration_ms), back, home, wait(ms), reply(给用户的话), done。\n"
     "输出严格 JSON 对象，不要任何多余说明。当某一步做不了时应输出 "
