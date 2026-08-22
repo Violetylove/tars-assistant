@@ -1,4 +1,4 @@
-package com.tars.assistant
+package org.atovio.tars
 
 import android.accessibilityservice.AccessibilityService
 import android.content.pm.PackageManager

@@ -4,6 +4,8 @@
 
 - AVD：`TARS_MODEL_API_35`，Android 15 / Google APIs / x86_64 / Pixel 5，6 vCPU、6 GB RAM、16 GB 数据盘。
 - Android App：`com.tars.assistant` Debug APK；无障碍、通知访问、麦克风和 Shizuku 授权按需由用户在系统 UI 中确认。
+- Android 命名空间迁移已完成代码调整，目标包名为 `org.atovio.tars`；本记录中的 `com.tars.assistant`
+  是迁移前已安装 APK 的历史验收事实。新包 Debug APK 已构建并安装；迁移前旧包已在 AVD 卸载，尚待重新进行系统授权。
 - Termux：官方 `v0.118.3` x86_64；保留 `~/tars-assistant` 与 `.venv`，用于运行自研 Python Agent。
 - 通信：Android App 仅访问本机 `http://127.0.0.1:8080`；Termux Agent 通过 HTTPS 访问云端 OpenAI-compatible 模型 API。
 
@@ -32,6 +34,9 @@
 14. [x] 重建并覆盖安装执行失败收敛修复版 Debug APK；模型定位 TARS 自身的敏感“发送给 TARS”按钮，确认弹窗取消后状态为“已取消: click”，Agent 仅记录一次请求且未进入下一轮观察。
 15. [x] 临时两轮探针首轮启动系统设置；第二轮使用同一 `session_id` 回传 `com.android.settings` 前台上下文、系统设置 UI XML 与首轮 `launch` history，随后已恢复真实云端 Agent。
 16. [x] 在绑定的无障碍服务下采集系统设置原始树，得到 21,695 字节 XML，含 `com.android.settings`、可交互节点和 bounds；正式选定无障碍直接序列化作为 UI 采集主路径。
+17. [x] 重建并覆盖安装通用动作轨迹版本；发送 `open settings` 后实际进入 `com.android.settings`，返回 TARS 后回执显示 `第 1 轮前台：com.tars.assistant` 和 `已执行: launch (com.android.settings)`，未触发第三方 App 或敏感操作。
+18. [x] 迁移后的 `org.atovio.tars` 已重新授予无障碍和 Shizuku API 权限；`open settings` 实际进入 `com.android.settings`，回执显示 `第 1 轮前台：org.atovio.tars` 与 `已执行: launch (com.android.settings)`。
+19. [x] 新包的受控 Gmail 输入任务在设备内 Agent 调用云端时出现 `ConnectionError`；按配置重试 2 次后返回 502，执行侧未下发任何 Gmail 动作并安全停止。Windows 侧正常云端探针已排除服务商配置，待恢复 AVD Termux 外网出口后复验。
 
 ## 已完成验收
 

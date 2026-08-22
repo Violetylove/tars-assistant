@@ -1,4 +1,4 @@
-package com.tars.assistant
+package org.atovio.tars
 
 import android.app.NotificationChannel
 import android.app.NotificationManager

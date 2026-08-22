@@ -1,4 +1,4 @@
-package com.tars.assistant
+package org.atovio.tars
 
 import android.app.Activity
 import android.app.AlertDialog

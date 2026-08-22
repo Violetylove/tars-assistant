@@ -1,4 +1,4 @@
-package com.tars.assistant
+package org.atovio.tars
 
 import android.content.ComponentName
 import android.content.ServiceConnection

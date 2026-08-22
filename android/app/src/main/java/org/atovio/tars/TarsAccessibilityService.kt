@@ -1,4 +1,4 @@
-package com.tars.assistant
+package org.atovio.tars
 
 import android.accessibilityservice.AccessibilityService
 import android.view.accessibility.AccessibilityEvent
@@ -65,7 +65,7 @@ class TarsAccessibilityService : AccessibilityService() {
     val isFloatingVoiceVisible: Boolean get() = floatingVoiceOverlay?.isVisible == true
 
     companion object {
-        const val ACTION_CONNECTED = "com.tars.assistant.ACCESSIBILITY_CONNECTED"
+        const val ACTION_CONNECTED = "org.atovio.tars.ACCESSIBILITY_CONNECTED"
         @Volatile var instance: TarsAccessibilityService? = null
         private const val OBSERVATION_POLL_MS = 100L
     }

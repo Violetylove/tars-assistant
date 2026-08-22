@@ -1,4 +1,4 @@
-package com.tars.assistant
+package org.atovio.tars
 
 import org.json.JSONObject
 import java.net.HttpURLConnection

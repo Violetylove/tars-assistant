@@ -416,6 +416,17 @@ def test_server_routes_open_gmail_skill_without_model():
     assert response["actions"] == [{"type": "launch", "package_name": "com.google.android.gm"}]
 
 
+def test_server_routes_open_tars_skill_to_current_application_id():
+    srv = _fresh_server()
+    response = srv.agent_run({
+        "protocol_version": "1.0",
+        "session_id": "open-tars",
+        "intent": "open tars",
+    })
+    assert response["done"] is True
+    assert response["actions"] == [{"type": "launch", "package_name": "org.atovio.tars"}]
+
+
 def test_cloud_config_rejects_placeholder_values(tmp_path):
     config = tmp_path / "cloud.yaml"
     config.write_text("llm: {base_url: 'https://api.example.com/v1'}\n", encoding="utf-8")

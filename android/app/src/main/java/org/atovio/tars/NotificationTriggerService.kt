@@ -1,4 +1,4 @@
-package com.tars.assistant
+package org.atovio.tars
 
 import android.app.Notification
 import android.service.notification.NotificationListenerService
@@ -20,5 +20,5 @@ class NotificationTriggerService : NotificationListenerService() {
         sendBroadcast(android.content.Intent(ACTION_PENDING_TRIGGER))
     }
 
-    companion object { const val ACTION_PENDING_TRIGGER = "com.tars.assistant.PENDING_TRIGGER" }
+    companion object { const val ACTION_PENDING_TRIGGER = "org.atovio.tars.PENDING_TRIGGER" }
 }

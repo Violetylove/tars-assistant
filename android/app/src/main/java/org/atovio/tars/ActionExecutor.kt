@@ -1,4 +1,4 @@
-package com.tars.assistant
+package org.atovio.tars
 
 import android.accessibilityservice.AccessibilityService
 import android.graphics.Rect
@@ -120,7 +120,7 @@ class ActionExecutor(
         private val ALLOWED = setOf("click", "type", "swipe", "back", "home", "launch", "wait", "reply", "done")
         private val LAUNCHABLE_PACKAGES = setOf(
             "com.android.settings",
-            "com.tars.assistant",
+            "org.atovio.tars",
             "com.google.android.gm",
             "com.tencent.mm",
         )

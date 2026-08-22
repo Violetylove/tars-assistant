@@ -1,4 +1,4 @@
-package com.tars.assistant
+package org.atovio.tars
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -7,7 +7,7 @@ import android.content.Context
 import android.content.Intent
 
 object TaskScheduler {
-    private const val ACTION_SCHEDULED_TASK = "com.tars.assistant.SCHEDULED_TASK"
+    private const val ACTION_SCHEDULED_TASK = "org.atovio.tars.SCHEDULED_TASK"
     private const val EXTRA_INTENT = "task_intent"
 
     fun scheduleIn(context: Context, taskIntent: String, delayMs: Long) {

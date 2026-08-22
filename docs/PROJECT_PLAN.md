@@ -80,7 +80,7 @@
 - [x] 单轮动作数量边界：协议限制每个 `agent_response` 最多 8 个动作，避免无界执行序列
 - [x] Loopback 代理隔离：Android 连接 Termux Agent 时显式绕过系统 HTTP 代理，避免第三方 App 的联网代理破坏本机通信
 - [x] 任务结果可见性：最终执行结果与失败信息不再被异步无障碍连接状态覆盖，便于用户审查与联调诊断
-- [ ] 通用跨应用动作轨迹 AVD 验收：在重新绑定无障碍服务后，以无副作用启动技能确认每轮前台、动作节点和观察结果均可见；不以第三方应用的最终 UI 状态替代执行层结论
+- [x] 通用跨应用动作轨迹 AVD 验收：以无副作用 `open settings` 固定技能确认每轮前台、动作节点和观察结果均可见；实际进入 `com.android.settings`，返回 TARS 后回执保留 `第 1 轮前台：com.tars.assistant` 与 `已执行: launch (com.android.settings)`，不以第三方应用的最终 UI 状态替代执行层结论
 - [x] **验收**：AVD 已完成 APK 安装/启动、服务声明、主界面、无障碍授权与绑定、loopback HTTP 策略、定时待处理链路、通知访问、Shizuku swipe 和设备内 Termux mock Agent 联调（见 `docs/AVD_TESTING.md`）
 
 ### 阶段 5：触发一期 + 端到端集成 + 部署
@@ -177,3 +177,11 @@
 | 2026-08-22 | 通用文本回退 AVD 验收：APK 构建与部署完成；实机回执确认当前阻塞为 Shizuku 服务未启动（非 TARS 代码或 Gmail 专用问题）。待管理器启动服务后复验同一无副作用输入任务。 |
 | 2026-08-22 | Shizuku 首次绑定时序修复与 AVD 复验：服务已启动并获 TARS 授权后，日志确认 Binder 在原固定 3 秒等待结束后到达，首个 `type` 被误判失败；改为有界循环等待 Binder 回调，保留超时 fail-closed。更新 APK 在 AVD 保持无障碍连接与 Shizuku 授权，受控跨应用任务的最终回执为 `已执行: type`。该结论仅证明面向当前焦点的通用输入执行成功；云端模型后续多轮改变前台状态，不能据此断言第三方应用的最终 UI 状态。 |
 | 2026-08-22 | 通用跨应用动作可观测性：主界面任务回执新增每轮前台包名、`click` / `type` 节点编号、界面更新和观察上限状态；不显示输入文本、滑动坐标或原始 UI。用于区分执行成功与后续模型改变前台，未引入任何第三方 App 特化。 |
+| 2026-08-22 | 通用动作轨迹 AVD 验收：`open settings` 固定技能实际启动 `com.android.settings`；返回 TARS 后，回执显示第一轮前台包名及 `launch (com.android.settings)`，完成真实设备闭环。 |
+| 2026-08-22 | Android 命名空间迁移：Kotlin/AIDL 源码目录、Gradle `namespace` / `applicationId`、本地广播 action、Shizuku Provider authority（随 application ID）及 Agent 启动白名单统一改为 `org.atovio.tars`。本次仅完成代码结构调整，尚未重新构建或部署；新 APK 安装后须按 Android 安全模型重新授权无障碍与 Shizuku。 |
+| 2026-08-22 | 云端正常链路基线：使用私有配置启动临时本机 loopback Agent，发送无 UI、无动作健康检查；得到 HTTP 200、终态空动作响应，耗时约 2.84 秒。服务随即停止，未输出私有配置；配额、限流和超时的真实失败标定仍保留为开放项。 |
+| 2026-08-22 | Android 新包构建：`org.atovio.tars` Debug APK 构建完成，输出元数据确认 application ID 已迁移；按用户要求未安装或部署到 AVD。 |
+| 2026-08-22 | Android 新包安装：`org.atovio.tars` Debug APK 已安装至 AVD，版本 `0.1.0`；迁移前 `com.tars.assistant` 未卸载、与新包并存。新包尚待用户重新授权无障碍与 Shizuku。 |
+| 2026-08-22 | AVD 旧包清理：经用户明确授权，卸载迁移前 `com.tars.assistant`，清除其本地数据与系统授权；核验仅保留新包 `org.atovio.tars`，未影响 Shizuku、Termux 或项目文件。 |
+| 2026-08-22 | Android 新包迁移回归：`org.atovio.tars` 已重新授予无障碍与 Shizuku API 权限；无副作用 `open settings` 固定技能实际打开系统设置，返回回执正确显示新包名与 `launch (com.android.settings)`。 |
+| 2026-08-22 | 设备内云端失败收敛：新包的受控 Gmail 输入任务在 Termux 调用云端时触发 `ConnectionError`；有界重试 2 次后 App 收到 502，未产生任何 Gmail 动作。Windows 正常探针表明问题为 AVD Termux 外网出口，待恢复后复验。 |

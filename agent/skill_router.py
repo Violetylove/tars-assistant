@@ -10,7 +10,7 @@ _LAUNCH_SKILLS = {
     "设置": ("com.android.settings", "正在打开系统设置"),
     "system settings": ("com.android.settings", "正在打开系统设置"),
     "settings": ("com.android.settings", "正在打开系统设置"),
-    "tars": ("com.tars.assistant", "正在打开 TARS Assistant"),
+    "tars": ("org.atovio.tars", "正在打开 TARS Assistant"),
     "gmail": ("com.google.android.gm", "正在打开 Gmail"),
     "微信": ("com.tencent.mm", "正在打开微信"),
     "wechat": ("com.tencent.mm", "正在打开微信"),

@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.tars.assistant"
+    namespace = "org.atovio.tars"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.tars.assistant"
+        applicationId = "org.atovio.tars"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
