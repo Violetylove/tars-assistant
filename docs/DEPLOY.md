@@ -7,6 +7,7 @@
 - 云端：只提供 OpenAI-compatible 大模型 API；不托管 TARS Agent，也不直接调用 Android。
 
 Android 与 Agent 固定为同一设备上的 `http://127.0.0.1:8080`。Agent 调云端模型必须使用 HTTPS。
+云端调用会发送任务文本与压缩后的 UI 摘要；部署前应确认所选服务商的数据处理和保留策略符合使用场景。
 
 ## 1. 云端模型私有配置
 
@@ -26,6 +27,8 @@ cp config/cloud.yaml.example config/cloud.yaml
 | `llm.model` | 服务商模型 ID |
 | `llm.api_key` | 服务商 API Key，仅保留在此私有文件 |
 | `llm.timeout_seconds` | 云端请求上限；建议 60-120 秒 |
+| `llm.max_retries` | 单次模型请求的额外重试次数，范围 0-3，默认 2 |
+| `llm.retry_backoff_seconds` | 首次重试前等待秒数，范围 0-10，后续指数翻倍，默认 1 |
 
 该文件被 Git 忽略。不要把 API Key 放入 Android 工程、APK、截图、日志或提交历史。
 
@@ -48,6 +51,10 @@ python -m agent.server
 Agent 只监听设备 loopback。启动后 Android App 的请求经 Agent 转发到云端模型，模型输出仍必须通过
 Python schema 校验与 Android 动作白名单、敏感操作确认。
 
+Agent 只对连接/超时、HTTP `429` 和 HTTP `5xx` 重试；认证、配额以外的 `4xx` 和无效响应立即失败。
+请求失败信息不会包含 API Key。重试只发生在模型决策请求尚未返回时，Android 仍只会执行最终通过
+schema 校验的单个响应。
+
 不配置云端 Key 时可执行协议联调：
 
 ```bash
@@ -63,6 +70,10 @@ python scripts/smoke_agent.py
 cd android
 gradle :app:assembleDebug --console=plain
 ```
+
+Android 的 `settings.gradle.kts` 已声明阿里云 Maven 镜像并保留 Google、Maven Central 与 Gradle Plugin
+Portal 回退，无需配置代理即可首次下载公开构建依赖。若所在网络仍无法访问这些仓库，再为 Gradle 配置代理；
+不要把代理凭据提交到仓库。
 
 安装 Debug APK 后，在系统设置中显式开启 TARS 无障碍服务；根据功能需要授予通知访问、麦克风和
 Shizuku 权限。Android App 只使用本机 loopback Agent，不能配置外部 URL。

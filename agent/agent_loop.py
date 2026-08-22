@@ -149,16 +149,18 @@ def decide_once(
             resp.setdefault("done", False)
         elif "type" in obj:
             # 单个 action 形态
-            is_done = obj.get("type") == "done"
-            # done 无需执行动作，也不进 actions
-            actions = [] if is_done else [obj]
+            action_type = obj.get("type")
+            is_terminal_reply = action_type == "reply"
+            is_done = action_type == "done"
+            # reply 是面向用户的终态文本，不应下发给 Android 作为可执行动作。
+            actions = [] if is_done or is_terminal_reply else [obj]
             resp = {
                 "protocol_version": PROTOCOL_VERSION,
                 "session_id": session_id,
-                "done": is_done or False,
-                "reply": "",
+                "done": is_done or is_terminal_reply,
+                "reply": obj.get("text", "") if is_terminal_reply else "",
                 "actions": actions,
-                "need_observation": (not is_done),  # 有动作需重采，done 不需
+                "need_observation": not (is_done or is_terminal_reply),
             }
         else:
             if attempt < max_retries:

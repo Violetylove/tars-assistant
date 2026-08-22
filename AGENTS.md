@@ -2,6 +2,8 @@
 
 基于原生 Android App + Termux Python Agent + 云端模型 API 的 AI 手机助手：原生 Kotlin App 负责屏幕感知与高权限执行，Python 决策层（自研安全 Agent 循环）负责思考，云端仅提供大模型推理。
 
+> 隐私边界：启用云端模型时，Agent 会向配置的服务商发送任务文本与压缩后的 UI 摘要；Android App 不直接暴露网络端点，原生 App↔Agent 仍为本机 loopback。
+
 ## Project
 
 - 形态（决策 D1/D10）：事件驱动。**原生 Kotlin App** 监听触发（定时/通知/悬浮语音）→ 调 Python Agent 决策 → **原生 App** 执行动作。
@@ -18,7 +20,7 @@
 
 ## Commands
 
-> 项目尚处文档奠基阶段，以下为规划命令（未实现，待落地后验证更新）。
+> 当前运行方式：Termux 保留自研 Python Agent；云端仅提供模型 API。
 
 - Agent 单测：`python -m pytest agent/`（LLM 走 mock，不依赖真实模型）
 - 启动 Agent 服务：`python -m agent.server`（协议联调用 `python -m agent.server --mock`）

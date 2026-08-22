@@ -42,7 +42,8 @@ def _runtime_not_configured(*, session_id: str, **_kwargs) -> dict:
 decision_fn: Callable = _runtime_not_configured
 
 def configure_runtime(*, mock: bool = False, base_url: str = "", model: str = "",
-                      api_key: str = "", timeout_seconds: float = 60.0) -> None:
+                      api_key: str = "", timeout_seconds: float = 60.0,
+                      max_retries: int = 2, retry_backoff_seconds: float = 1.0) -> None:
     """Configure the process-local decision backend before serving HTTP requests.
 
     Mock mode is intentionally explicit: it proves the Android-to-Agent loopback
@@ -64,7 +65,10 @@ def configure_runtime(*, mock: bool = False, base_url: str = "", model: str = ""
         logger.warning("Agent is running in explicit mock mode; no model actions are produced")
         return
 
-    llm = LLMClient(base_url=base_url, model=model, api_key=api_key, timeout=timeout_seconds)
+    llm = LLMClient(
+        base_url=base_url, model=model, api_key=api_key, timeout=timeout_seconds,
+        max_retries=max_retries, retry_backoff_seconds=retry_backoff_seconds,
+    )
     decision_fn = lambda **kwargs: decide_once(llm=llm, **kwargs)
 
 
@@ -78,7 +82,8 @@ def main() -> None:
     else:
         config = load_cloud_config(args.config)
         configure_runtime(base_url=config.base_url, model=config.model, api_key=config.api_key,
-                          timeout_seconds=config.timeout_seconds)
+                          timeout_seconds=config.timeout_seconds, max_retries=config.max_retries,
+                          retry_backoff_seconds=config.retry_backoff_seconds)
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8080)
 

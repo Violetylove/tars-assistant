@@ -3,6 +3,8 @@
 原生 Android App + Termux Python Agent 的 AI 手机助手。Android 负责感知与受限动作执行；项目自研
 Python Agent 负责安全决策；云端仅提供 OpenAI-compatible 大模型推理。
 
+云端模式会将任务文本和 Agent 压缩后的 UI 摘要发送给您配置的模型服务商；请只在可接受该数据处理边界时启用。
+
 ## 架构
 
 **原生 App -> 本机 Termux Agent -> HTTPS 云端模型 -> Agent 安全校验 -> 原生 App 执行**
@@ -28,7 +30,7 @@ python -m agent.server
 
 ## 状态
 
-阶段 0-4 已完成，阶段 5 继续完成云端模型的真实动作闭环验收。原生侧保留 UI 树采集、动作白名单、
+阶段 0-2 与阶段 4 已完成；阶段 3 与阶段 5 继续完成云端模型的真实动作闭环验收。原生侧保留 UI 树采集、动作白名单、
 敏感操作确认、通知/定时/语音触发；本地 llama.cpp、GGUF 模型及其生命周期不再属于部署方案。
 
 ## 文档

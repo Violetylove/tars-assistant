@@ -3,10 +3,11 @@
 import json
 
 import pytest
+import requests
 from fastapi.testclient import TestClient
 
 from agent.ui_summarizer import summarize_xml, to_llm_prompt
-from agent.llm_client import MockLLM, extract_json
+from agent.llm_client import CloudRequestError, LLMClient, MockLLM, extract_json
 from agent.agent_loop import decide_once, run_decision_loop
 from agent import server
 from agent.cloud_config import load_cloud_config
@@ -83,6 +84,84 @@ def test_extract_json_invalid():
     assert extract_json("nothing here") is None
 
 
+class _FakeResponse:
+    def __init__(self, status_code: int = 200, content: str = '{"type":"done"}'):
+        self.status_code = status_code
+        self._content = content
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.exceptions.HTTPError(response=self)
+
+    def json(self):
+        return {"choices": [{"message": {"content": self._content}}]}
+
+
+class _ScriptedRequests:
+    exceptions = requests.exceptions
+
+    def __init__(self, outcomes):
+        self.outcomes = iter(outcomes)
+        self.calls = []
+
+    def post(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        outcome = next(self.outcomes)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+def _client_for_retry_test(outcomes, *, max_retries=2, backoff=0.25):
+    waits = []
+    client = LLMClient(
+        base_url="https://api.example.com/v1", model="test-model", api_key="test-secret-key",
+        timeout=30, max_retries=max_retries, retry_backoff_seconds=backoff, sleep_fn=waits.append,
+    )
+    scripted = _ScriptedRequests(outcomes)
+    client._requests = scripted
+    return client, scripted, waits
+
+
+def test_llm_client_retries_timeout_then_returns_completion():
+    client, scripted, waits = _client_for_retry_test([
+        requests.exceptions.Timeout("timed out"), _FakeResponse(content='{"type":"done"}'),
+    ])
+    assert client.complete([{"role": "user", "content": "test"}]) == '{"type":"done"}'
+    assert len(scripted.calls) == 2
+    assert waits == [0.25]
+
+
+def test_llm_client_retries_rate_limit_with_exponential_backoff():
+    client, scripted, waits = _client_for_retry_test([
+        _FakeResponse(status_code=429), _FakeResponse(status_code=503), _FakeResponse(content="ok"),
+    ])
+    assert client.complete([]) == "ok"
+    assert len(scripted.calls) == 3
+    assert waits == [0.25, 0.5]
+
+
+def test_llm_client_does_not_retry_authentication_error():
+    client, scripted, waits = _client_for_retry_test([_FakeResponse(status_code=401)])
+    with pytest.raises(CloudRequestError, match="HTTP 401"):
+        client.complete([])
+    assert len(scripted.calls) == 1
+    assert waits == []
+
+
+def test_llm_client_reports_exhausted_transient_retries_without_secret():
+    client, scripted, waits = _client_for_retry_test([
+        requests.exceptions.ConnectionError("offline"),
+        requests.exceptions.ConnectionError("offline"),
+        requests.exceptions.ConnectionError("offline"),
+    ])
+    with pytest.raises(CloudRequestError, match="已重试 2 次") as exc_info:
+        client.complete([])
+    assert "test-secret-key" not in str(exc_info.value)
+    assert len(scripted.calls) == 3
+    assert waits == [0.25, 0.5]
+
+
 # ===== agent_loop =====
 
 def test_decide_once_valid_action():
@@ -137,11 +216,20 @@ def test_run_decision_loop_terminates_on_done():
     assert resp["done"] is True
 
 
-def test_run_decision_loop_stops_on_no_action():
+def test_decide_once_turns_single_reply_into_a_terminal_response():
+    llm = MockLLM(script=[lambda: json.dumps({"type": "reply", "text": "需要你手动确认"})])
+    resp = decide_once(llm=llm, session_id="s1", intent="问", ui_xml=SIMPLE_XML)
+    assert resp["done"] is True
+    assert resp["reply"] == "需要你手动确认"
+    assert resp["actions"] == []
+    assert resp["need_observation"] is False
+
+
+def test_run_decision_loop_stops_on_single_reply():
     llm = MockLLM(script=[lambda: json.dumps({"type": "reply", "text": "需要你手动确认"})])
     resp = run_decision_loop(llm=llm, session_id="s1", intent="问", ui_xml=SIMPLE_XML)
-    assert resp["done"] is False
-    assert resp["actions"] == []
+    assert resp["done"] is True
+    assert resp["reply"] == "需要你手动确认"
 
 
 def test_run_decision_loop_caps_steps():
@@ -275,10 +363,25 @@ def test_cloud_config_loads_https_provider_settings(tmp_path):
     config = tmp_path / "cloud.yaml"
     config.write_text(
         "llm:\n  base_url: 'https://api.example.com/v1'\n  model: 'provider-model'\n"
-        "  api_key: 'provider-secret-key'\n  timeout_seconds: 90\n",
+        "  api_key: 'provider-secret-key'\n  timeout_seconds: 90\n"
+        "  max_retries: 3\n  retry_backoff_seconds: 2\n",
         encoding="utf-8",
     )
     loaded = load_cloud_config(config)
     assert loaded.base_url == "https://api.example.com/v1"
     assert loaded.model == "provider-model"
     assert loaded.timeout_seconds == 90
+    assert loaded.max_retries == 3
+    assert loaded.retry_backoff_seconds == 2
+
+
+@pytest.mark.parametrize("extra", ["max_retries: 4", "retry_backoff_seconds: 11", "timeout_seconds: 0"])
+def test_cloud_config_rejects_out_of_bound_resilience_settings(tmp_path, extra):
+    config = tmp_path / "cloud.yaml"
+    config.write_text(
+        "llm:\n  base_url: 'https://api.example.com/v1'\n  model: 'provider-model'\n"
+        "  api_key: 'provider-secret-key'\n  " + extra + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError):
+        load_cloud_config(config)

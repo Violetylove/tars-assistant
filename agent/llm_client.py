@@ -10,7 +10,12 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Callable, Optional
+import time
+from typing import Callable, Optional
+
+
+class CloudRequestError(RuntimeError):
+    """A cloud failure safe to show as an Agent error without exposing secrets."""
 
 
 class LLMClient:
@@ -18,11 +23,17 @@ class LLMClient:
 
     def __init__(self, base_url: str,
                  model: str,
-                 api_key: str, timeout: float = 60.0):
+                 api_key: str, timeout: float = 60.0,
+                 max_retries: int = 2,
+                 retry_backoff_seconds: float = 1.0,
+                 sleep_fn: Callable[[float], None] = time.sleep):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key
         self.timeout = timeout
+        self.max_retries = max_retries
+        self.retry_backoff_seconds = retry_backoff_seconds
+        self._sleep = sleep_fn
         try:
             import requests
         except ImportError as exc:  # pragma: no cover - 环境应装有 requests
@@ -31,19 +42,47 @@ class LLMClient:
 
     def complete(self, messages: list[dict], temperature: float = 0.0) -> str:
         """返回补全的纯文本内容。"""
-        resp = self._requests.post(
-            f"{self.base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            json={
-                "model": self.model,
-                "messages": messages,
-                "temperature": temperature,
-            },
-            timeout=self.timeout,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return data["choices"][0]["message"]["content"]
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        for attempt in range(self.max_retries + 1):
+            try:
+                resp = self._requests.post(
+                    f"{self.base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    json=payload,
+                    timeout=self.timeout,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return data["choices"][0]["message"]["content"]
+            except self._requests.exceptions.RequestException as exc:
+                if not self._is_retryable(exc) or attempt >= self.max_retries:
+                    raise self._request_error(exc, attempt) from exc
+                self._sleep(self.retry_backoff_seconds * (2 ** attempt))
+            except (KeyError, IndexError, TypeError, ValueError) as exc:
+                raise CloudRequestError("云端模型返回格式无效") from exc
+
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    def _is_retryable(self, exc: Exception) -> bool:
+        exceptions = self._requests.exceptions
+        if isinstance(exc, (exceptions.Timeout, exceptions.ConnectionError)):
+            return True
+        if isinstance(exc, exceptions.HTTPError):
+            status_code = getattr(getattr(exc, "response", None), "status_code", None)
+            return status_code == 429 or (isinstance(status_code, int) and 500 <= status_code < 600)
+        return False
+
+    def _request_error(self, exc: Exception, retries_used: int) -> CloudRequestError:
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        detail = f"HTTP {status_code}" if status_code is not None else type(exc).__name__
+        if self._is_retryable(exc) and retries_used:
+            return CloudRequestError(f"云端模型请求失败，已重试 {retries_used} 次：{detail}")
+        return CloudRequestError(f"云端模型请求失败：{detail}")
 
 
 # --- Mock，供开发/测试，不依赖真实模型 ---

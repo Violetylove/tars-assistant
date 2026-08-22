@@ -32,7 +32,7 @@ class MainActivity : Activity() {
             if (intent.action == TarsAccessibilityService.ACTION_CONNECTED) {
                 if (!requestInFlight) status.text = "无障碍服务已连接"
             } else {
-                status.text = "有待处理任务，请点击“载入最新通知”后检查"
+                status.text = "有待处理任务，请点击“载入待处理任务”后检查"
             }
         }
     }
@@ -46,7 +46,7 @@ class MainActivity : Activity() {
         val holdToSpeak = Button(this).apply { text = "按住说话" }
         val toggleFloatingVoice = Button(this).apply { text = "启用悬浮语音" }
         val schedule = Button(this).apply { text = "15 分钟后提醒" }
-        val useNotification = Button(this).apply { text = "载入最新通知" }
+        val useNotification = Button(this).apply { text = "载入待处理任务" }
         val authorizeShizuku = Button(this).apply { text = "授权 Shizuku" }
         status = TextView(this).apply { text = "等待无障碍服务连接" }
         voice = VoiceIntentCapture(this, onResult = { transcript ->
@@ -57,7 +57,7 @@ class MainActivity : Activity() {
             if (intent.isEmpty()) { status.text = "请输入任务意图"; return@setOnClickListener }
             run.isEnabled = false
             requestInFlight = true
-            status.text = "本地模型首次加载或推理中，请稍候"
+            status.text = "云端模型推理中，请稍候"
             executor.execute {
                 try {
                     val service = TarsAccessibilityService.instance
@@ -187,8 +187,8 @@ class MainActivity : Activity() {
     private fun loadPendingTrigger() {
         PendingTriggerStore.take(this)?.let {
             intentInput.setText(it)
-            status.text = "已载入通知触发，请检查任务后发送"
-        } ?: run { status.text = "没有待处理的通知触发" }
+            status.text = "已载入待处理任务，请检查后发送"
+        } ?: run { status.text = "没有待处理任务" }
     }
 
     private fun requestNotificationPermission() {

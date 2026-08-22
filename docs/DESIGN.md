@@ -10,6 +10,7 @@ AI 手机助手：核心原则：**事件驱动、协议先行、LLM 输出不�
 - 目标设备：Android（裸 Termux + venv 承载 Python Agent）；云端仅提供模型 API
 - 开发环境：Windows + ADB + Android Studio AVD
 - 感知：纯文本 UI 树（非视觉）；模型：云端 OpenAI-compatible 模型，经私有配置选择
+- 隐私边界：Agent 向云端模型发送任务文本与压缩后的 UI 摘要；云端模型服务商的数据处理策略由部署者选择并负责评估
 
 ## 2. 系统架构
 
@@ -31,8 +32,8 @@ AI 手机助手：核心原则：**事件驱动、协议先行、LLM 输出不�
 └──────────────────────────────────────────────┘
 ```
 
-Agent 经 HTTPS 调用云端模型 API。云端不直接接收 Android UI、不会执行动作，也不承载 Agent 的
-schema 校验或安全策略。
+Agent 经 HTTPS 调用云端模型 API，并发送任务文本与压缩后的 UI 摘要。云端不直接暴露 Android
+执行端点、不会执行动作，也不承载 Agent 的 schema 校验或安全策略。
 
 ## 3. 组件职责
 
@@ -164,6 +165,9 @@ LLM 视角的紧凑行格式：`[12] 按钮"发送" (450,900)`——供 prompt �
 
 **铁律**：所有 `action` 必须通过 `bridge/` 的 JSON Schema 校验；非法/缺失字段的决策一律拒绝，返回安全错误，不执行任何操作。
 
+模型若以单对象 `{"type":"reply","text":"..."}` 输出答复，Agent 将其规范化为 `done=true`、
+`reply` 填入该文本且 `actions=[]` 的终态响应；该文本不会作为 Android 可执行动作下发，也不会触发额外观察轮次。
+
 `launch` 仅由 Agent 侧固定技能路由生成，当前白名单为系统设置、TARS Assistant 与微信；Android
 执行侧再次校验包名，并只使用 `PackageManager.getLaunchIntentForPackage()` 创建启动 Intent。未知应用、
 未安装应用和任何任意 Intent/命令均拒绝，不提供模型可控的组件、URI 或 shell 参数。
@@ -183,7 +187,7 @@ LLM 视角的紧凑行格式：`[12] 按钮"发送" (450,900)`——供 prompt �
   2. **截断**：文本超长截断；节点数超限（暂定 60 个）按可视区域优先级裁剪
   3. **排序**：按 bounds 从上到下、从左到右
 - 输出：紧凑行文本（喂 LLM）+ 结构化 nodes（供执行引用 id）
-- 验收基线：单屏摘要 ≤ 500 token（3B 上下文 8K 内留足决策余量）
+- 验收基线：单屏摘要 ≤ 500 token，以控制云端请求体与延迟
 
 UI 采集方案（阶段 4 在 AVD 实测后定，倾向 A，但均在原生 App 内完成，非独立工具）：
 - **方案 A（推荐）**：原生 App 经 Shizuku 执行 `uiautomator dump` 导出完整 XML（含 bounds），App 读文件并回传
@@ -214,6 +218,7 @@ Python 包。后续可将其作为 Python 决策层的编排实现，但不改�
 - 推理端点：云端 OpenAI-compatible `/v1/chat/completions`。
 - 私有配置：`config/cloud.yaml`，由 `config/cloud.yaml.example` 初始化并被 Git 忽略。
 - `llm_client` 以 `base_url`、`model`、`api_key` 配置化接入；切换服务商或模型不改 Agent 代码。
+- 云端请求仅对连接/超时、HTTP `429` 和 `5xx` 进行有界指数退避重试（默认额外 2 次）；认证、其他 `4xx` 和响应格式错误直接失败，错误信息不得包含 API Key。
 - 手机不安装或运行 GGUF、llama.cpp、llama-server；Termux 只承载 Python Agent。
 - 云端返回内容仍是不可信输入，必须经 Agent schema 校验与 Android 执行安全层。
 

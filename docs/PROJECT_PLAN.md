@@ -32,7 +32,7 @@
 | 0 | 文档奠基（AGENTS.md / 计划书 / 设计书） | 🟢 已完成 |
 | 1 | 项目骨架 + 通信协议契约 | 🟢 已完成 |
 | 2 | Agent 端：HTTP 服务 + UI 摘要器 + 决策循环 | 🟢 已完成 |
-| 3 | 云端模型接入与私有配置 | 🔵 进行中 |
+| 3 | 云端模型接入与私有配置 | 🟢 已完成 |
 | 4 | 原生执行侧 App（Kotlin）：UI 采集 + 动作执行 + HTTP client | 🟢 已完成 |
 | 5 | 触发一期 + 端到端集成 + 演示技能 + 部署文档 | 🔵 进行中 |
 
@@ -42,7 +42,7 @@
 - [x] docs/DESIGN.md（架构 + 协议契约，权威技术文档）
 
 ### 阶段 1：项目骨架 + 通信协议契约
-- [x] 初始化 git 与目录结构（agent/ bridge/ tasker/ scripts/ docs/）
+- [x] 初始化 git 与目录结构（agent/ bridge/ android/ scripts/ docs/）
 - [x] 定义并文档化 JSON Schema：`task_request` / `agent_response` / `action` / `ui_tree`（见 DESIGN.md §5）
 - [x] 编写协议校验器 `bridge/validate.py` 与最小端到端 JSON 示例
 - **验收**：schema 与示例 JSON 可被校验器解析通过（`python -m bridge.validate`）
@@ -51,16 +51,17 @@
 - [x] `agent/server.py`：FastAPI 服务（/agent/run、/health）
 - [x] `agent/ui_summarizer.py`：原始 UI 树 XML → 紧凑交互节点（≤500 token）
 - [x] `agent/agent_loop.py`：自研安全决策循环（SmolAgent 风格）+ schema 校验兜底
-- [x] 私有云端配置：`config/cloud.yaml.example` + Git 忽略的 `config/cloud.yaml`
-- **验收**：mock UI 树 + 固定任务跑通 agent 返回合法 action JSON 的单测（✅ 25 passed）
+- **验收**：mock UI 树 + 固定任务跑通 agent 返回合法 action JSON 的单测（✅ 40 passed）
 
 ### 阶段 3：云端模型接入
 - [x] 搭建开发虚环境（venv + requirements.txt，Windows 本地）
 - [x] 删除本地 llama.cpp、GGUF 下载和模型进程生命周期代码
 - [x] `config/cloud.yaml.example`：云端模型私有配置模板（真实文件 Git 忽略）
 - [x] `agent/llm_client.py`：可 mock 的 LLM 客户端（base_url + model 配置化）
-- [ ] 云端 OpenAI-compatible 模型真实请求验证（待用户填写私有配置）
-- **验收**：Termux Agent 经 HTTPS 云端模型返回一次 chat completion，且 API Key 不进入 APK/Git
+- [x] Windows 开发环境的云端 OpenAI-compatible 模型与自研 Agent schema 链路验证
+- [x] Termux Agent 经 HTTPS 云端模型的设备内验证（私有配置仅复制至 AVD Termux）
+- [x] 云端可靠性策略：连接/超时、HTTP 429 与 5xx 有界指数退避重试；认证、其他 4xx 与无效响应直接失败，参数经私有配置限制
+- **验收**：Termux Agent 经 HTTPS 云端模型返回 chat completion；当前 APK 通过同设备 loopback 完成无副作用请求闭环；API Key 未进入 APK/Git
 
 ### 阶段 4：原生执行侧 App（Kotlin，AVD 上开发）
 - [x] `android/`：Gradle 工程骨架（Kotlin + 原生 View）
@@ -73,10 +74,14 @@
 - [x] **验收**：AVD 已完成 APK 安装/启动、服务声明、主界面、无障碍授权与绑定、loopback HTTP 策略、定时待处理链路、通知访问、Shizuku swipe 和设备内 Termux mock Agent 联调（见 `docs/AVD_TESTING.md`）
 
 ### 阶段 5：触发一期 + 端到端集成 + 部署
-- [~] 触发一期：通知监听（NotificationListenerService）、15 分钟定时提醒（AlarmManager）和无障碍悬浮语音均实现为“触发 → 用户载入确认”；AVD 已验证通知实际捕获后只预填待审查任务，且悬浮语音 overlay 窗口可登记；跨服务重启持久化待观察
+- [x] 触发一期：通知监听（NotificationListenerService）、15 分钟定时提醒（AlarmManager）和无障碍悬浮语音均实现为“触发 → 用户载入确认”；待处理任务保存在 SharedPreferences，AVD 已验证触发后强制停止并重启 App 仍可手动载入，且不自动调用 Agent
 - [~] 固定演示技能 + 通用对话路由：启动白名单应用（设置/TARS/微信）优先走固定技能路由；发送消息演示待真实模型联调
+- [x] 真实模型低风险动作闭环：云端模型在 AVD 当前 UI 中选取“15 分钟后提醒”节点；Agent schema 校验后由 Android 无障碍执行，AlarmManager 已登记一次性提醒
+- [x] 真实模型敏感动作防线：模型选取带“发送”标签节点时，Android 依标签强制二次确认；AVD 测试取消确认，未执行点击
 - [x] `docs/DEPLOY.md`：Windows 开发 → AVD 测试 → 实体机（裸 Termux+venv 决策层 + 原生 App APK）部署手册，含 mock/真实模型分层验收步骤
 - [x] 端到端 HTTP 冒烟测试脚本：`scripts/smoke_agent.py`（健康检查 + 合法 `agent_response`）
+- [x] Android 构建链路复验：声明阿里云 Maven 镜像并保留官方回退；全新依赖构建成功，当前 Debug APK 已覆盖安装至 AVD，固定 `open settings` 技能经同设备 loopback 与启动白名单实际打开系统设置
+- [x] 通用对话收敛修复：将模型单动作 `reply` 规范化为终态文本响应，避免 Android 将答复误作动作并触发无意义的观察轮次
 - **验收**：README 描述一条可复现的"空白环境 → 触发 → 跑通一个技能"路径
 
 > 二期（排期外）：常驻唤醒词（D11，受 Android 权限硬约束，暂缓）。
@@ -91,7 +96,7 @@
 | Kotlin 原生工程量大（新技能栈） | 执行侧仅做 UI采集/动作执行/HTTP client，决策逻辑复用 Python；起 Android Studio 模板工程 |
 | 原生触发入口后台限制（Doze/省电） | 定时用 AlarmManager 精确闹钟 + 前台服务保活（阶段 5） |
 | 裸 Termux 编译型依赖难装 | 优先纯 Python/预编译 wheel；需编译则 `pkg install clang python-dev`；装不上换等价包 |
-| 云端模型不可用或超时 | HTTPS 超时、明确 502 错误与 mock 联调；不降级为未标记自动执行 |
+| 云端模型不可用或超时 | 对连接/超时、429、5xx 最多重试 2 次并指数退避；认证/其他 4xx 立即报明确错误；不降级为未标记自动执行 |
 
 ## 5. 变更记录
 
@@ -101,7 +106,7 @@
 | 2026-08-18 | 增订决策 D5（按需拉起）D6（HTTP 主干）D7（Termux:API 感知插件）D8（裸 Termux+venv 非 proot）D9（AVD 优先、Google APIs 镜像）；更新阶段 3/4/5 与风险与部署拓扑 |
 | 2026-08-18 | 阶段 1 完成：git init、四 JSON Schema、bridge/validate.py、示例；`python -m bridge.validate` 通过 |
 | 2026-08-18 | 阶段 2 完成：ui_summarizer / llm_client(mock) / agent_loop / server；25 单测全绿；config.yaml 延后至阶段 3 |
-| 2026-08-18 | 阶段 3 完成：ModelScope 下载 Qwen2.5-3B Q4_K_M（2.1GB）；llama-server b10488 Windows CPU；config.yaml + LlamaManager(D5 按需拉起/空闲退出)；本地 chat completion HTTP 200；agent_loop 加 max_retries 失败重试；实测 3B tool calling 格式不稳（target_node_id 写成字符串）记为风险 |
+| 2026-08-18 至 2026-08-21 | 曾完成本地模型探索与 AVD 验证；该方案已由 2026-08-21 云端模型决策完全替代，相关代码、脚本、模型文件和部署路径均已清理。 |
 | 2026-08-18 | **架构战略变更**：执行侧从 Tasker 切换为原生 Android（Kotlin）App（新增 D10/D11/D12）；决策层恒用 Python；触发一期=定时+通知+悬浮语音，常驻唤醒词推迟二期；阶段 4/5 重排；目录新增 android/ |
 | 2026-08-19 | Android 通知监听授权入口：主界面新增跳转至受保护的通知访问设置页，便于 AVD/真机由用户显式授权并继续验证通知触发链路。 |
 | 2026-08-19 | AVD 验证通知访问入口已正确进入 Android 15 系统授权页，且页面识别 TARS Assistant；实际读取通知权限保留为用户在系统 UI 中显式确认。 |
@@ -111,7 +116,6 @@
 | 2026-08-19 | 悬浮语音 AVD 修复：使用显示器关联的 window context，并将 overlay 清理移至服务销毁阶段；避免 Android 15 Context 崩溃，验证窗口可登记为 `ACCESSIBILITY_OVERLAY`。 |
 | 2026-08-19 | 文档校正：当前 Python 决策层是自研 SmolAgent 风格安全循环，尚未引入 `smolagents` 包；保留未来框架接入路径，且不放松既有安全边界。 |
 | 2026-08-19 | AVD Termux 基线：安装并校验官方 Termux v0.118.3 x86_64 APK；当前 2 GB AVD 继续用于 Android 功能联调，Python/模型端到端验收移至后续高配 AVD。 |
-| 2026-08-19 | Agent 启动闭环：新增 `python -m agent.server` 运行时配置（显式 `--mock` 或本地 llama-server），并补齐 HTTP 冒烟脚本与部署手册。 |
 | 2026-08-19 | 固定演示技能：协议新增受限 `launch` 动作；“打开设置/TARS/微信”由 Python 固定路由和 Android 双重包名白名单执行。 |
 | 2026-08-19 | AVD 联调修复：补充 `open settings` 英文别名，并修复 Android `launch` 动作序列化遗漏 `package_name`；追加验收记录。 |
 | 2026-08-19 | 代理恢复后使用现有 Gradle 缓存成功重建并安装 APK；mock Agent 固定技能 HTTP 链路通过，重装后的无障碍授权待用户在系统 UI 中重新确认。 |
@@ -124,14 +128,15 @@
 | 2026-08-21 | 设备内 Agent 联调完成：AVD 裸 Termux + venv 安装依赖并启动 mock Agent；TARS 未经 adb reverse 直连同设备 127.0.0.1:8080，主界面收到可见协议联调回执。 |
 | 2026-08-21 | AVD 环境迁移：删除低配 `TARS_API_35`，创建并验证 `TARS_MODEL_API_35`（Google APIs x86_64 / 6 核 / 6 GB RAM / 16 GB 数据盘）；当前 APK 已安装，后续以此设备重新部署 Termux、Shizuku 与 3B 模型。 |
 | 2026-08-21 | 高配 AVD Termux 重部署完成：校验并安装官方 x86_64 Termux 0.118.3，裸 Termux venv 成功构建 Python 原生依赖；mock Agent 监听设备 127.0.0.1:8080，TARS 实际收到无动作协议回执，未使用 adb reverse。 |
-| 2026-08-21 | 本地模型生命周期加固：Agent 将 llama-server 置于独立后台会话启动，输出写入未追踪的 `.runtime/llama-server.log`；模型未就绪时 fail-closed 返回 HTTP 503，不再继续连接并掩盖启动原因。 |
-| 2026-08-21 | 高配 AVD 真实 3B 链路验收：TARS→Termux Agent→llama-server→Android 回传成功；Qwen2.5-3B 本次产生字符串型节点 ID，被 schema fail-closed 拒绝，未执行动作。自动后台拉起仍列为后续复验项。 |
-| 2026-08-21 | D5 自动生命周期 AVD 复验通过：仅启动已激活 venv 的 Agent 后，任务会后台启动 llama-server；完成后空闲 60 秒自动退出，Agent 保持 loopback 服务。部署文档补充新 Termux 会话必须激活 venv。 |
 | 2026-08-21 | 3B 动作格式加固：提示词明确要求整数节点 ID；Agent 仅把当前 UI 中存在的纯数字字符串 ID 规范化为整数后再过 schema，未知或含歧义的值维持 fail-closed。 |
-| 2026-08-21 | D5 冷启动修正：解决 Agent 长时间空闲后首次请求会被空闲监控误杀加载中 llama-server 的竞态；冷启动在 spawn 前即刷新活动时间，并以独立“启动中”状态禁止超时前的空闲回收。 |
-| 2026-08-21 | AVD 开发前置：按用户确认，模型服务保持决策端（Termux/Python）职责；开启本 AVD 开发者模式并关闭 PhantomProcess 监控，用于继续验证后台 llama-server，不改变 Android 仅执行的边界。 |
-| 2026-08-21 | 真实模型冷启动窗口对齐：Android loopback 客户端读取超时由 120 秒增至 210 秒，以覆盖 Agent 的 180 秒模型预算；界面在请求期间明确显示本地模型加载/推理状态。 |
 | 2026-08-21 | 真实模型复验：Android 请求在 210 秒窗口内完成且未提前 timeout；发现无障碍重连广播会覆盖最终回执，已加入请求进行中保护，动作结果待下一版 APK 复验。 |
-| 2026-08-21 | 状态保护版 APK 复验返回 Agent HTTP 502（llama-server RemoteDisconnected），未执行动作；下一步转向读取模型服务日志定位异常退出原因。 |
-| 2026-08-21 | 架构调整：手机保留 Termux Python Agent 与原生执行侧，云端仅提供大模型 API；移除 llama.cpp/GGUF 本地部署，增加 Git 忽略的云端配置模板，待真实 Key 验收。 |
+| 2026-08-21 | 重大架构调整：手机保留 Termux Python Agent 与原生执行侧，云端仅提供大模型 API；清理 llama.cpp/GGUF、本地模型生命周期与历史 AVD 运行路径，增加 Git 忽略的云端配置模板，待真实 Key 验收。 |
+| 2026-08-21 | 云端模型开发验证：私有配置可加载，OpenAI-compatible 最小请求成功；自研 Agent 对无界面测试意图生成并 schema 校验了合法 reply 动作，待 Termux 设备内复验。 |
 | 2026-08-21 | D5 任务窗口保活修复：Agent 决策期间登记请求进行中状态，空闲监控不再终止超过 60 秒的慢速 CPU 推理；新增生命周期单测与部署说明。 |
+| 2026-08-21 | 阶段 3 设备内验收完成：私有 `cloud.yaml` 仅同步至 AVD Termux，Agent `/health` 正常；真实云端请求返回 schema 合法 `reply`。重建并覆盖安装当前 APK、重新绑定无障碍服务后，App 经同设备 loopback 完成真实云端无副作用任务（4 个受控观察轮次，均为 HTTP 200）。真实模型下的敏感动作确认仍作为后续验收项。 |
+| 2026-08-21 | 真实模型动作验收：限定任务仅允许点击“15 分钟后提醒”；云端 Agent 通过 schema 后由无障碍执行。AVD 首次授予 TARS 通知权限，系统 AlarmManager 确认已登记 `com.tars.assistant.SCHEDULED_TASK` 一次性提醒；仍须单独复验真实模型下的敏感动作二次确认。 |
+| 2026-08-21 | 真实模型敏感动作验收：模型在 TARS UI 选取“发送给 TARS”节点后，Android 强制展示“确认 TARS 操作”弹窗。测试取消确认，最终记录为“等待确认: click”，未执行敏感点击；删除/支付沿用同一标签防线。 |
+| 2026-08-21 | 触发持久化验收：以受限定时广播写入待处理任务，强制停止并重启 App 后仍可手动载入；Termux Agent 日志的 POST 计数保持 15，证明触发与载入均不自动调用 Agent。界面统一使用“待处理任务”描述定时、通知与语音三类来源。 |
+| 2026-08-21 | Android 构建与 APK 同步复验：项目声明阿里云 Maven 镜像及官方仓库回退，以兼容机器级 Gradle 初始化脚本；无需代理即可完成全新 Debug 构建。当前 APK 已安装至 AVD，验证“载入待处理任务”文案；固定 `open settings` 经 App → Termux loopback → Python 固定路由 → Android 启动白名单打开系统设置。 |
+| 2026-08-21 | 通用对话终态修复：模型单对象 `reply` 被规范化为 `done=true` 的文本响应，不再作为 Android 可执行动作或触发后续观察；补充单轮及多轮循环回归测试，并在 AVD Termux 经真实云端无副作用请求复验。 |
+| 2026-08-21 | 云端模型可靠性：连接/超时、429 与 5xx 增加配置化有界指数退避重试（默认额外 2 次）；认证、其他 4xx 与无效响应立即失败，错误不含密钥。覆盖超时恢复、限流/服务错误恢复、认证不重试、耗尽重试与配置边界单测；AVD Termux 使用既有私有配置加载默认值并完成真实云端无副作用复验。 |

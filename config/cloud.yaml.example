@@ -7,3 +7,6 @@ llm:
   model: "replace-with-provider-model-id"
   api_key: "REPLACE_WITH_PROVIDER_KEY"
   timeout_seconds: 60
+  # Retry only transient network failures, HTTP 429, and HTTP 5xx responses.
+  max_retries: 2
+  retry_backoff_seconds: 1
