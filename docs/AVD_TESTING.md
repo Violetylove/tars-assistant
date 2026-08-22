@@ -38,6 +38,7 @@
 18. [x] 迁移后的 `org.atovio.tars` 已重新授予无障碍和 Shizuku API 权限；`open settings` 实际进入 `com.android.settings`，回执显示 `第 1 轮前台：org.atovio.tars` 与 `已执行: launch (com.android.settings)`。
 19. [x] 清除遗留的 ADB `tcp:10000` 转发并重启 Termux Agent；取消 `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` 后，设备内 Agent 直接访问国内云端模型成功，`127.0.0.1:10000` 不再监听。
 20. [~] 受控 Gmail 输入任务已启动 Gmail 并聚焦收件人输入框；当前 UI 仍为空，尚未确认云端是否继续生成或执行 `type`，未填写主题/正文、未选择联系人、未发送邮件。该结果不能归因于 Shizuku 输入失败。
+21. [x] AVD 全局代理设为宿主机 `10.0.2.2:10000` 后，`open gmail` 成功进入 `com.google.android.gm`；后续模型动作触发 TARS 敏感点击确认弹窗，测试选择取消，回执为 `已取消: click`，未发送邮件。
 
 ## 已完成验收
 
@@ -59,3 +60,4 @@
 - 多轮观察验收：临时确定性 Termux 服务的第一轮只启动系统设置并请求观察；执行侧仅在当前 UI XML 与首轮快照不同后才发起第二轮。探针记录确认第二轮使用同一会话，含 `app=com.android.settings`、系统设置的原始 UI XML 与首轮 `launch` history；真实云端 Agent 已在测试结束后恢复。
 - 设备内云端无代理验收：移除遗留 ADB `tcp:10000` 转发并清除 Termux 代理环境变量后，Agent 进程保持监听 `127.0.0.1:8080`，无 UI、无动作请求经 HTTPS 直连国内云端模型成功；Android 与 Agent 的 loopback 通信仍固定使用 8080。
 - Gmail 受控输入阶段结果：真实云端动作链成功启动 Gmail 并将收件人字段置于焦点，但当前字段仍为空；测试严格未选择联系人、未填写主题或正文、未点击发送。下一步需用更明确的通用任务描述确认模型是否继续返回 `type`，再判断执行层表现。
+- Gmail 代理与安全回归：AVD 使用 `10.0.2.2:10000` 全局代理后仍可启动 Gmail；Shizuku 已启动并授权，真实动作到达 Android 后触发敏感确认，取消后安全停止，未发送邮件。
