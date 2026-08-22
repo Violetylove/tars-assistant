@@ -40,6 +40,7 @@
 20. [~] 受控 Gmail 输入任务已启动 Gmail 并聚焦收件人输入框；当前 UI 仍为空，尚未确认云端是否继续生成或执行 `type`，未填写主题/正文、未选择联系人、未发送邮件。该结果不能归因于 Shizuku 输入失败。
 21. [x] AVD 全局代理设为宿主机 `10.0.2.2:10000` 后，`open gmail` 成功进入 `com.google.android.gm`；后续模型动作触发 TARS 敏感点击确认弹窗，测试选择取消，回执为 `已取消: click`，未发送邮件。
 22. [~] 自动跨应用任务再次成功进入 Gmail `ComposeActivityGmail`，收件人 `EditText` 保持焦点且主题/正文为空；云端本轮未继续下发 `type`，未触发发送确认，未发送邮件。剩余问题限定为模型动作链连续规划。
+23. [x] 设备审计日志复验：同步最新 `agent/server.py` 后，真实 Gmail 会话日志记录 `home`、`click`、`click`、`type` 四轮响应；TARS 最终回执为 `执行失败: type`。诊断 APK 已安装，暂停继续操作，待后续读取 `TarsAction`/`TarsShizuku` 细节。
 
 ## 已完成验收
 
@@ -65,3 +66,4 @@
 - Gmail 自动表单回归：完整任务可由 Agent 自动启动 Gmail 并点击写邮件，收件人字段真实获得焦点；当前模型未在下一轮生成 `type`，因此不归因于输入执行层失败。
 - Agent 日志诊断：此前服务仅记录异常，无法判断 Gmail 多轮中是云端未返回 `type` 还是执行侧未发起下一轮；已补充安全元数据日志，重启 Termux Agent 后可按 session 追踪每轮 `actions`、`done` 与 `need_observation`。
 - Agent/执行层定位：设备日志确认同一 Gmail 会话实际返回 `home`、`click`、`click`、`type` 四轮动作；TARS 最终回执为 `执行失败: type`，故 Agent 规划链正常，阻塞在 Android 输入执行层。诊断 APK 已增加 `nodeFound/focused/setText` 与 Shizuku 回退日志并完成构建安装。
+- AVD 授权自动化：在受控模拟器中通过 ADB 写入 `org.atovio.tars/org.atovio.tars.TarsAccessibilityService` 并启用无障碍总开关，`dumpsys accessibility` 确认服务 Bound；实体机仍须遵循系统授权流程。

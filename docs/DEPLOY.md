@@ -78,6 +78,25 @@ Portal 回退，无需配置代理即可首次下载公开构建依赖。若所�
 安装 Debug APK 后，在系统设置中显式开启 TARS 无障碍服务；根据功能需要授予通知访问、麦克风和
 Shizuku 权限。Android App 只使用本机 loopback Agent，不能配置外部 URL。
 
+### AVD 自动授权与 Shizuku
+
+受控 AVD 可由开发者使用 ADB 完成授权，无需用户在设置页操作：
+
+```powershell
+$adb="$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
+& $adb shell settings put secure enabled_accessibility_services org.atovio.tars/org.atovio.tars.TarsAccessibilityService
+& $adb shell settings put secure accessibility_enabled 1
+```
+
+Shizuku 仍需先由管理器启动，再在 TARS 中授权；启动后应在 TARS 主界面看到“Shizuku 已授权”。
+这组 ADB 授权步骤仅适用于开发 AVD，不作为实体机部署建议。
+
+### Agent 审计日志
+
+Agent 正常启动时会以 INFO 记录请求/响应元数据：会话 ID、前台包名、UI 节点数、history 轮数、动作类型、
+`done` 和 `need_observation`。不会记录任务正文、原始 UI、输入文本或 API Key。日志用于定位跨应用多轮
+动作是否由模型生成、是否送达 Android；Android 执行细节通过 `TarsAction` 和 `TarsShizuku` 日志查看。
+
 ## 4. 清理旧本地模型
 
 切换后可从设备的 Termux 中删除旧模型、模型服务二进制和诊断日志；不要删除 `~/tars-assistant` 或
