@@ -43,6 +43,8 @@
 23. [x] 设备审计日志复验：同步最新 `agent/server.py` 后，真实 Gmail 会话日志记录 `home`、`click`、`click`、`type` 四轮响应；TARS 最终回执为 `执行失败: type`。诊断 APK 已安装，暂停继续操作，待后续读取 `TarsAction`/`TarsShizuku` 细节。
 24. [x] Gmail 输入执行层诊断：三阶段确定性探针（launch Gmail → 点写邮件 → type 收件人）驱动 TARS 完整复现；`TarsAction` 日志确认 `type target=7 class=android.view.ViewGroup focused=false setText=false`，`findNode` 命中收件人行容器而非内部 `EditText`；Shizuku `input text` 回退将真实邮箱 `violetylove@163.com` 注入当前焦点，Gmail 解析出联系人 Winter Yuan。
 25. [x] 执行层修复验证：`ActionExecutor` 新增 `findEditableNode`（type 目标向下解析为实际可输入节点，先聚焦再 SET_TEXT），并统一 `agent/ui_summarizer.py` 与 Kotlin `collect()` 的类名可交互判定为 contains 语义。修复后复跑两次均 `type target=7 class=android.widget.EditText focused=true setText=true`，无障碍直写成功、无需 Shizuku 回退；收件人字段保留 `violetylove@163.com` 与联系人解析。
+26. [x] 真实云端模型端到端复验：聚焦意图（"open gmail compose email to violetylove@163.com do not send"）下，Agent 审计日志记录 `home → click → click → type → done` 五轮全绿；type 执行 `class=android.widget.EditText focused=true setText=true`，收件人字段填入 `violetylove@163.com` 并解析出联系人 Winter Yuan，修复在真实链路生效。首次尝试中模型曾引用无效节点 `type target=8 nodeFound=false`，执行层 fail-closed 安全收敛（未记录 history、停止任务）。
+27. [x] 真实云端敏感防线复验：模型点击含"发送"标签的节点（TARS 自身"发送给 TARS"）时，Android 强制弹出"确认 TARS 操作"；测试点击"取消"后回执为 `已取消: click`，点击未执行、任务安全停止（仅一轮请求），确认防线与失败收敛在真实模型下均生效。
 
 ## 已完成验收
 
