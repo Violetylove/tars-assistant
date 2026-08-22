@@ -18,6 +18,7 @@ ACTION_TYPES = {
     "swipe",
     "back",
     "home",
+    "launch",
     "wait",
     "reply",
     "done",
@@ -46,9 +47,16 @@ _COMMON_DEFS = {
             "duration_ms": {"type": "integer", "minimum": 0},
             "ms": {"type": "integer", "minimum": 0},
             "requires_confirmation": {"type": "boolean"},
+            "package_name": {"type": "string", "minLength": 1, "maxLength": 200},
         },
         "required": ["type"],
         "additionalProperties": False,
+        "allOf": [
+            {
+                "if": {"properties": {"type": {"const": "launch"}}},
+                "then": {"required": ["package_name"]},
+            },
+        ],
     },
     "ui_node": {
         "type": "object",

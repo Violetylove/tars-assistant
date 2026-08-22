@@ -3,9 +3,13 @@ jsonschema>=4.20
 PyYAML>=6.0
 
 # --- 阶段2: Agent 服务 ---
-# fastapi
-# uvicorn[standard]
-# smolagents
+fastapi>=0.110
+uvicorn[standard]>=0.29
+requests>=2.31
 
-# --- 阶段3: 推理层 ---
-# llama-cpp-python  (若用原生绑定；或仅依赖独立 llama-server，则无需此项)
+# --- 测试 ---
+pytest>=8.0
+httpx>=0.27       # FastAPI TestClient 依赖
+
+# --- 可选：本地 llama-cpp-python 绑定（Windows 编译易失败，生产改用 llama-server 独立进程，故不默认启用）
+# llama-cpp-python[server]

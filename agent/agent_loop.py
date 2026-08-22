@@ -30,6 +30,9 @@ SYSTEM_PROMPT = (
     "节点行格式：[id] 类型\"文本\" (cx,cy)。"
 )
 
+# Confirmation is derived from UI content, never trusted to the model's flag alone.
+_SENSITIVE_LABELS = ("发送", "删除", "清除", "支付", "付款", "转账", "send", "delete", "pay")
+
 
 def _build_user_message(intent: str, nodes: list[dict], history: list[dict]) -> str:
     segs = [f"用户意图：{intent}", "当前屏幕节点：", to_llm_prompt(nodes)]
@@ -65,6 +68,18 @@ def _safe_response(session_id: str, reply: str) -> dict:
     }
 
 
+def _enforce_sensitive_confirmation(resp: dict, nodes: list[dict]) -> None:
+    """Mark clicks on sensitive UI targets for mandatory App-side confirmation."""
+    by_id = {node["id"]: node for node in nodes}
+    for action in resp.get("actions", []):
+        if action.get("type") != "click":
+            continue
+        node = by_id.get(action.get("target_node_id"))
+        label = (node or {}).get("text", "").casefold()
+        if any(term in label for term in _SENSITIVE_LABELS):
+            action["requires_confirmation"] = True
+
+
 def decide_once(
     *,
     llm,
@@ -72,55 +87,80 @@ def decide_once(
     intent: str,
     ui_xml: str,
     history: Optional[list[dict]] = None,
+    max_retries: int = 1,
 ) -> dict:
     """单轮决策：摘要 + 调 LLM + 净化 + schema 校验。返回合法 agent_response。
 
-    若 LLM 输出非法，返回 reply=错误说明 + 空 actions（安全拒绝，不抛异常）。
+    若 LLM 输出非法，会带错误提示重试（最多 max_retries 次）；仍失败则返回
+    reply=错误说明 + 空 actions（安全拒绝，不抛异常）。
     """
     nodes = summarize_xml(ui_xml)
     user_msg = _build_user_message(intent, nodes, history or [])
-    raw = llm.complete([
+    messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_msg},
-    ])
+    ]
 
-    obj = extract_json(raw)
-    if not isinstance(obj, dict):
-        return _safe_response(session_id, f"LLM 输出无法解析为 JSON：{raw[:120]!r}")
+    for attempt in range(max_retries + 1):
+        raw = llm.complete(messages, temperature=0)
+        obj = extract_json(raw)
 
-    # 构造 agent_response（若 LLM 只给单个 action，不强制包 agent_response，兼容两态）
-    if "actions" in obj or "done" in obj:
-        resp = dict(obj)
-        resp.setdefault("protocol_version", PROTOCOL_VERSION)
-        resp.setdefault("session_id", session_id)
-        resp.setdefault("reply", "")
-        resp.setdefault("actions", [])
-        resp.setdefault("need_observation", False)
-        resp.setdefault("done", False)
-    elif "type" in obj:
-        # 单个 action 形态
-        errs = validate_action(obj)
-        if errs:
-            return _safe_response(session_id, "LLM 动作用于拒绝：" + "; ".join(errs))
-        # done 是结束动作：联动 done 标志
-        is_done = obj.get("type") == "done"
-        # done 无需执行动作，也不进 actions
-        actions = [] if is_done else [obj]
-        resp = {
-            "protocol_version": PROTOCOL_VERSION,
-            "session_id": session_id,
-            "done": is_done or False,
-            "reply": "",
-            "actions": actions,
-            "need_observation": (not is_done),  # 有动作需重采，done 不需
-        }
-    else:
-        return _safe_response(session_id, f"LLM 输出缺少可识别的动作字段：{obj}")
+        if not isinstance(obj, dict):
+            if attempt < max_retries:
+                messages.append({"role": "assistant", "content": raw[:2000]})
+                messages.append({
+                    "role": "user",
+                    "content": "你的输出不是一个合法 JSON 对象。请仅输出一个 JSON 对象，不要任何文字。",
+                })
+                continue
+            return _safe_response(session_id, f"LLM 输出无法解析为 JSON：{raw[:120]!r}")
 
-    errs = validate(resp, "agent_response")
-    if errs:
+        # 构造 agent_response（若 LLM 只给单个 action，不强制包 agent_response，兼容两态）
+        if "actions" in obj or "done" in obj:
+            resp = dict(obj)
+            resp.setdefault("protocol_version", PROTOCOL_VERSION)
+            resp.setdefault("session_id", session_id)
+            resp.setdefault("reply", "")
+            resp.setdefault("actions", [])
+            resp.setdefault("need_observation", False)
+            resp.setdefault("done", False)
+        elif "type" in obj:
+            # 单个 action 形态
+            is_done = obj.get("type") == "done"
+            # done 无需执行动作，也不进 actions
+            actions = [] if is_done else [obj]
+            resp = {
+                "protocol_version": PROTOCOL_VERSION,
+                "session_id": session_id,
+                "done": is_done or False,
+                "reply": "",
+                "actions": actions,
+                "need_observation": (not is_done),  # 有动作需重采，done 不需
+            }
+        else:
+            if attempt < max_retries:
+                messages.append({"role": "assistant", "content": raw[:2000]})
+                messages.append({
+                    "role": "user",
+                    "content": "你的输出缺少可识别的动作字段（type/actions/done）。请重新输出合法 JSON。",
+                })
+                continue
+            return _safe_response(session_id, f"LLM 输出缺少可识别的动作字段：{obj}")
+
+        _enforce_sensitive_confirmation(resp, nodes)
+        errs = validate(resp, "agent_response")
+        if not errs:
+            return resp
+        if attempt < max_retries:
+            messages.append({"role": "assistant", "content": raw[:2000]})
+            messages.append({
+                "role": "user",
+                "content": "你的输出未通过 schema 校验：" + "; ".join(errs[:5])
+                + "。请修正后仅输出一个合法 JSON 对象。其中 target_node_id 必须是节点序号数字，"
+                + "text 必须是字符串。",
+            })
+            continue
         return _safe_response(session_id, "LLM 响应未通过 schema 校验：" + "; ".join(errs[:5]))
-    return resp
 
 
 def run_decision_loop(

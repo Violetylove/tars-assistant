@@ -10,6 +10,19 @@ venv/
 models/
 *.gguf
 
+# Local binaries (llama.cpp etc., not committed)
+tools/
+
 # OS / editor
 .DS_Store
 Thumbs.db
+
+# Android SDK path (developer machine local configuration)
+android/local.properties
+android/.gradle/
+android/.gradle-local/
+android/build/
+android/app/build/
+
+# Reasonix local runtime metadata and task cache
+.reasonix/

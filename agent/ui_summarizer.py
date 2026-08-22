@@ -128,6 +128,9 @@ def _is_true(v) -> bool:
 
 def summarize_xml(xml: str, max_nodes: int = MAX_NODES) -> List[dict]:
     """便捷单例接口，供 agent 决策循环 / server 直接调用。"""
+    # 无障碍服务尚未连接时，首轮请求可能没有 UI 树；按空屏处理。
+    if not (xml or "").strip():
+        return []
     return Summarizer(max_nodes=max_nodes).summarize(xml)
 
 

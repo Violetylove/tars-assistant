@@ -17,21 +17,21 @@
 ┌──────────────────────────────────────────────┐
 │                Android 手机                    │
 │                                               │
-│  ┌─────────┐  事件触发   ┌──────────────────┐  │
-│  │ Tasker  │───────────▶│  HTTP (127.0.0.1) │  │
-│  │ 触发/执行 │  JSON 动作  │  :8080 Agent 服务  │  │
-│  │ 无障碍服务 │◀───────────│  FastAPI          │  │
-│  └────┬────┘            └────────┬─────────┘  │
-│       │ 无障碍点击                 │ 决策循环       │
-│  ┌────▼────┐          ┌──────────▼─────────┐  │
-│  │ Shizuku │◀─────────│ SmolAgent          │  │
-│  │ 高权限执行 │          │ ui_summarizer     │  │
-│  └─────────┘          │ llm_client (mock)  │  │
-│                       └──────────┬─────────┘  │
-│                       ┌──────────▼─────────┐  │
-│                       │ llama-server       │  │
-│                       │ Qwen2.5-3B GGUF    │  │
-│                       └────────────────────┘  │
+│  ┌──────────────────────────┐  HTTP(loopback) │
+│  │  原生 Kotlin App (执行侧)  │─────▶┌──────────────────────┐ │
+│  │  触发:定时/通知/悬浮语音     │◀─────│  :8080 Agent 服务     │ │
+│  │  UI采集:uiautomator/无障碍  │ JSON │  FastAPI              │ │
+│  │  执行:无障碍性能/Shizuku    │      └────────┬─────────────┘ │
+│  └──────────┬───────────────┘               │ 决策循环             │
+│             │ Shizuku 高权限                 ┌─▼─────────────────┐ │
+│  ┌──────────▼───────────────┐                │ 安全 Agent 循环     │ │
+│  │ Shizuku server (系统权限)  │◀───────────────│ ui_summarizer     │ │
+│  │ input tap/swipe/text     │                │ llm_client        │ │
+│  └──────────────────────────┘                └─────────┬─────────┘ │
+│                                             ┌─────────▼─────────┐ │
+│                                             │ llama-server      │ │
+│                                             │ Qwen2.5-3B GGUF   │ │
+│                                             └───────────────────┘ │
 └──────────────────────────────────────────────┘
 ```
 
@@ -39,10 +39,10 @@
 
 | 组件 | 职责 | 位置 |
 |------|------|------|
-| Tasker | 事件入口（语音/通知/定时）、UI 树采集、动作执行、结果回传 | Android 应用 |
-| Shizuku | 高权限执行通道（input tap/swipe/text 等） | Android 服务 |
+| 原生 App（执行侧） | 触发入口（定时/通知/悬浮语音）、UI 树采集（uiautomator）、动作执行、结果回传 | `android/`（Kotlin） |
+| Shizuku | 高权限执行通道（input tap/swipe/text 等），由原生 App 经官方库调用 | Android 服务 |
 | Agent 服务 | HTTP 门面：路由请求、调用决策循环、返回动作 | `agent/server.py` |
-| SmolAgent 循环 | 思考→行动→观察；强制结构化 JSON 输出 + schema 校验 | `agent/agent_loop.py` |
+| 安全 Agent 循环 | 思考→行动→观察；强制结构化 JSON 输出 + schema 校验；当前为自研实现 | `agent/agent_loop.py` |
 | ui_summarizer | 原始 UI 树 XML → 紧凑交互节点列表（≤500 token） | `agent/ui_summarizer.py` |
 | llm_client | llama-server 封装（OpenAI 兼容），可 mock | `agent/llm_client.py` |
 | llama-server | 本地推理端点（/v1/chat/completions） | `scripts/start_llama.sh` |
@@ -50,29 +50,29 @@
 ## 4. 运行时数据流（一次任务）
 
 ```
-1. 触发    Tasker 事件（如语音"打开微信给张三发消息"）
-2. 采集    Tasker 采集当前 UI 树（uiautomator dump via Shizuku / 无障碍，方案见 §6）
+1. 触发    原生 App 事件（定时器/通知监听/悬浮按钮按住说"打开微信给张三发消息"）
+2. 采集    原生 App 采集当前 UI 树（uiautomator dump via Shizuku，见 §6）
 3. 请求    POST /agent/run：intent + app + 原始 UI 树 XML + 会话历史
 4. 摘要    Agent 端 ui_summarizer 将 XML 压缩为交互节点列表（LLM 视角 ≤500 token）
-5. 决策    SmolAgent 循环（≤N 轮）：LLM 输出 action JSON → schema 校验
+5. 决策    安全 Agent 循环（≤N 轮）：LLM 输出 action JSON → schema 校验
 6. 响应    返回 agent_response（action 列表 + reply + need_observation）
-7. 执行    Tasker 解析 action：普通动作走无障碍，高权限走 Shizuku
+7. 执行    原生 App 解析 action：普通动作走无障碍，高权限走 Shizuku
 8. 观察    执行后重新采集 UI 树，作为下一轮输入（need_observation=true 时）
-9. 收敛    action.type = reply / done → 任务结束，Tasker 呈现结果
+9. 收敛    action.type = reply / done → 任务结束，原生 App 呈现结果
 ```
 
 ## 5. 通信协议契约（protocol_version: 1.0）
 
-**决策 D6 = 纯 HTTP loopback 作为 Tasker↔Agent 唯一通信主干**（2026-08-18 与用户确认）。不引入 WebSocket/MQTT 常驻通道（省内存）；Termux:API 定位为**感知插件**（语音/剪贴板等，D7），不作为通信主干，二期再讨论接入。Agent 主动推送能力预留在 §4 数据流的 future 扩展，MVP 不实现。
+**决策 D6 = 纯 HTTP loopback 作为原生 App↔Agent 唯一通信主干**（2026-08-18 与用户确认）。不引入 WebSocket/MQTT 常驻通道（省内存）；Termux:API 定位为**感知插件**（剪贴板等，D7），不作为通信主干，二期再讨论。语音识别一期走 **SpeechRecognizer**（原生，D11），不再经 Termux:API。Agent 主动推送能力预留在 §4 数据流的 future 扩展，MVP 不实现。
 
 ### 5.1 HTTP 端点
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
 | `/agent/run` | POST | 主入口：一次任务（可含多轮动作，状态由 session_id 维系） |
-| `/health` | GET | 存活检查（Tasker 联调用） |
+| `/health` | GET | 存活检查（原生 App 联调用） |
 
-- 仅监听 `127.0.0.1`（Termux 本地回环），不暴露局域网
+- 仅监听 `127.0.0.1`（Termux 本地回环），不暴露局域网；Android 客户端固定为 `http://127.0.0.1:8080`（Manifest 为此受限 loopback 用途启用 cleartext，客户端拒绝任何非 loopback endpoint）。服务应以 `python -m agent.server` 启动：`--mock` 仅做协议联调，默认模式接本地 llama-server。
 - `Content-Type: application/json`，UTF-8
 - 未知字段忽略；必填字段缺失或非法 → 400 + 结构化错误
 
@@ -93,11 +93,11 @@
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | protocol_version | string | 是 | 当前 "1.0" |
-| session_id | string | 是 | 一次任务的会话标识（Tasker 生成 UUID） |
+| session_id | string | 是 | 一次任务的会话标识（原生 App 生成 UUID） |
 | intent | string | 是 | 用户意图（语音转文字/通知文本/定时任务描述） |
 | app | string | 否 | 当前前台应用包名 |
 | activity | string | 否 | 当前 Activity |
-| ui_xml | string | 否 | 当前 UI 树原始 XML（首轮必带；后续轮由 need_observation 驱动重采） |
+| ui_xml | string | 否 | 当前 UI 树原始 XML；未采集到 UI 树时可省略或传空字符串，Agent 按空节点安全决策；后续轮由 need_observation 驱动重采 |
 | history | array | 否 | 前序轮次的 action 与观察摘要（服务端亦可按 session_id 缓存） |
 
 ### 5.3 `ui_tree`（Agent 内部结构，调试/执行用）
@@ -148,7 +148,7 @@ LLM 视角的紧凑行格式：`[12] 按钮"发送" (450,900)`——供 prompt �
 | done | bool | 是 | true = 任务结束（reply 为最终答复） |
 | reply | string | 否 | 给用户的中间/最终文本 |
 | actions | array | 否 | 待执行动作列表（有序执行；为空表示无动作） |
-| need_observation | bool | 否 | true = Tasker 执行后须重采 UI 树回传（进入下一轮） |
+| need_observation | bool | 否 | true = 原生 App 执行后须重采 UI 树回传（进入下一轮） |
 
 ### 5.5 `action` 类型
 
@@ -159,11 +159,23 @@ LLM 视角的紧凑行格式：`[12] 按钮"发送" (450,900)`——供 prompt �
 | swipe | x1,y1,x2,y2,duration_ms | Shizuku | 滑动 |
 | back | — | 无障碍全局动作 | 返回 |
 | home | — | 无障碍全局动作 | 回桌面 |
+| launch | package_name | 原生 App | 启动固定技能白名单中的应用 |
 | wait | ms | 无 | 等待界面稳定 |
 | reply | text | 无 | 向用户回复（配合 done） |
 | done | — | 无 | 任务结束 |
 
 **铁律**：所有 `action` 必须通过 `bridge/` 的 JSON Schema 校验；非法/缺失字段的决策一律拒绝，返回安全错误，不执行任何操作。
+
+`launch` 仅由 Agent 侧固定技能路由生成，当前白名单为系统设置、TARS Assistant 与微信；Android
+执行侧再次校验包名，并只使用 `PackageManager.getLaunchIntentForPackage()` 创建启动 Intent。未知应用、
+未安装应用和任何任意 Intent/命令均拒绝，不提供模型可控的组件、URI 或 shell 参数。
+
+### 5.6 触发任务的用户审查
+
+通知、定时和悬浮语音均只能将文本保存为本地待处理任务，并显示本地通知；它们不得自动请求
+`/agent/run` 或执行动作。用户须在主界面点击“载入最新通知”、检查预填意图后，再显式点击
+“发送给 TARS”。悬浮语音使用无障碍服务的 `TYPE_ACCESSIBILITY_OVERLAY`，避免申请可覆盖所有
+应用的 `SYSTEM_ALERT_WINDOW` 权限。
 
 ## 6. 感知层设计（ui_summarizer）
 
@@ -175,26 +187,31 @@ LLM 视角的紧凑行格式：`[12] 按钮"发送" (450,900)`——供 prompt �
 - 输出：紧凑行文本（喂 LLM）+ 结构化 nodes（供执行引用 id）
 - 验收基线：单屏摘要 ≤ 500 token（3B 上下文 8K 内留足决策余量）
 
-UI 采集方案（阶段 4 实测后定，倾向 A）：
-- **方案 A（推荐）**：Shizuku 执行 `uiautomator dump` 导出完整 XML（含 bounds），Tasker 读文件回传
-- 方案 B：Tasker 无障碍 UI Query（元素扁平列表，bounds 获取受限）
+UI 采集方案（阶段 4 在 AVD 实测后定，倾向 A，但均在原生 App 内完成，非独立工具）：
+- **方案 A（推荐）**：原生 App 经 Shizuku 执行 `uiautomator dump` 导出完整 XML（含 bounds），App 读文件并回传
+- 方案 B：原生无障碍服务直接取节点树（`AccessibilityNodeInfo`），元素完整、bounds 可得但不含部分扩展属性，传输更轻可控
 
 ## 7. 执行层与安全设计
 
-### 7.1 双通道执行
+### 7.1 双通道执行（原生 App 内）
 
-| 通道 | 覆盖动作 | 授权 |
-|------|----------|------|
-| 无障碍服务 | click（普通）、back/home 全局动作 | 无障碍服务开关 |
-| Shizuku | input tap/swipe/text、模拟按键 | `adb shell sh /data/local/tmp/shizuku_starter.sh` 或无线调试 |
+| 通道 | 覆盖动作 | 授权 | 库 |
+|------|----------|------|-----|
+| 无障碍服务 | click（普通）、back/home 全局动作 | 无障碍服务开关 | `AccessibilityService` |
+| Shizuku | 参数受限的 input swipe（一期实现） | Shizuku 授权（starter/无线调试） | `dev.rikka.shizuku` 官方 UserService + AIDL |
+
+原生 App 作为执行侧统一调度两通道：普通动作走无障碍（无需额外权限逻辑），高权限走 Shizuku。Shizuku UserService 仅暴露已定义的动作方法；当前仅允许坐标和时长均通过 App 校验的 swipe，不传递 LLM 生成的 shell 命令。
 
 ### 7.2 三层安全兜底
 
 1. **Schema 校验**（Agent 端）：非法 action 一律拒绝，不执行
-2. **动作白名单**（Tasker 端）：高权限动作类型 + 目标应用白名单
-3. **关键操作确认**（Tasker 端）：支付/删除/发送等敏感动作默认 `requires_confirmation=true`，弹窗确认后才执行
+2. **动作白名单**（原生 App 端）：高权限动作类型 + 目标应用白名单
+3. **关键操作确认**（双层）：Python 按目标 UI 文本将支付/删除/发送等敏感 click 强制标为 `requires_confirmation=true`；原生 App 以当前节点文本再次判定并弹窗确认，不能信任 LLM 给出的 false
 
 ## 8. 模型层与升级路径
+
+当前 `agent/agent_loop.py` 是自研的 SmolAgent 风格循环，项目尚未安装或导入 `smolagents`
+Python 包。后续可将其作为 Python 决策层的编排实现，但不改变本协议或削弱 §7.2 的安全边界。
 
 - 推理端点：llama-server（OpenAI 兼容 `/v1/chat/completions`）
 - 模型档位（`agent/config.yaml`）：
@@ -219,16 +236,16 @@ UI 采集方案（阶段 4 实测后定，倾向 A）：
 
 | 环境 | 用途 | 说明 |
 |------|------|------|
-| Windows | 开发/单测 | agent + bridge 全量可测（LLM mock）；llama-server 跑 x86 版验证推理 |
-| AVD | 集成测试 | **系统镜像：Google APIs**（Shizuku/Tasker 授权最顺，贴近真机）；`shizuku_starter.sh` 启动 |
-| 实体机 | 生产 | **裸 Termux + venv**（独立虚拟环境隔离依赖，**不用 proot-distro 常驻容器**）；Shizuku + 无线调试授权 |
+| Windows | 开发/单测 | agent + bridge 全量可测（LLM mock）；llama-server 跑 x86 版验证推理；Kotlin 代码 Gradle 编译 |
+| AVD | 集成测试 | **系统镜像：Google APIs**（Shizuku/无障碍授权最顺，贴近真机）；`shizuku_starter.sh` 启动 |
+| 实体机 | 生产 | **裸 Termux + venv**（决策层 Python）；**原生 App**（执行侧，安装 APK）；Shizuku + 无线调试授权 |
 
 **模拟器优先原则**：开发测试始终先走 AVD（x86 镜像），不用真机；生产部署以真机为准，二者共用同一份代码与 `docs/DESIGN.md` 契约。
 
 ## 10. 开放问题（阶段推进中逐项关闭）
 
-- [ ] UI 采集方案 A/B 实测定夺（§6）
+- [ ] UI 采集方案 A/B 实测定夺（§6，原生 App 内完成的两种取树方式）
 - [ ] 每轮执行后是否都重采 UI（观察频率与成本实测）
-- [ ] 语音输入走 Tasker 内置识别还是接入 Termux:API（二期，D7）
-- [ ] 会话历史由 Tasker 回传（history 字段）还是服务端缓存（session_id）——倾向服务端缓存，减小请求体
+- [ ] 常驻唤醒词：二期评估（受 Android 权限硬约束，D11 已排除一期）
+- [ ] 会话历史由原生 App 回传（history 字段）还是服务端缓存（session_id）——倾向服务端缓存，减小请求体
 - [ ] `start_llama.sh` 空闲超时阈值实测标定（默认 60s，见 §8.1）

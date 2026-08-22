@@ -53,6 +53,11 @@ def test_summarize_button_fields():
     assert btn["bounds"] == [240, 900, 600, 990]
 
 
+def test_summarize_accepts_missing_ui_tree_as_empty_nodes():
+    assert summarize_xml("") == []
+    assert summarize_xml("   ") == []
+
+
 def test_to_llm_prompt_compact():
     nodes = summarize_xml(SIMPLE_XML)
     prompt = to_llm_prompt(nodes)
@@ -86,6 +91,12 @@ def test_decide_once_valid_action():
     assert resp["actions"][0]["type"] == "click"
     assert resp["actions"][0]["target_node_id"] == 1
     assert resp["need_observation"] is True
+
+
+def test_decide_once_marks_sensitive_click_for_confirmation():
+    llm = MockLLM(script=[lambda: json.dumps({"type": "click", "target_node_id": 1, "requires_confirmation": False})])
+    resp = decide_once(llm=llm, session_id="s1", intent="点击发送", ui_xml=SIMPLE_XML)
+    assert resp["actions"][0]["requires_confirmation"] is True
 
 
 def test_decide_once_rejects_invalid_json():
@@ -141,6 +152,17 @@ def test_server_rejects_bad_request():
     assert "task_request 校验失败" in r.json()["detail"]
 
 
+def test_server_unconfigured_runtime_fails_closed():
+    srv = _fresh_server()
+    response = srv.agent_run({
+        "protocol_version": "1.0",
+        "session_id": "unconfigured",
+        "intent": "测试",
+    })
+    assert response["actions"] == []
+    assert "未配置" in response["reply"]
+
+
 def test_server_run_with_mock_decision():
     srv = _fresh_server()
     srv.decision_fn = lambda **kw: {
@@ -162,3 +184,52 @@ def test_server_run_with_mock_decision():
     body = r.json()
     assert body["done"] is True
     assert body["reply"] == "OK 已点击"
+
+
+def test_server_configure_mock_runtime_runs_a_valid_response():
+    srv = _fresh_server()
+    srv.configure_runtime(mock=True)
+    response = srv.agent_run({
+        "protocol_version": "1.0",
+        "session_id": "mock-runtime",
+        "intent": "完成测试",
+        "ui_xml": SIMPLE_XML,
+        "history": [],
+    })
+    assert response["done"] is True
+    assert response["actions"] == []
+    assert response["reply"] == "协议联调完成（mock，未调用本地模型）"
+
+
+def test_server_accepts_request_without_ui_tree_in_mock_mode():
+    srv = _fresh_server()
+    srv.configure_runtime(mock=True)
+    response = srv.agent_run({
+        "protocol_version": "1.0",
+        "session_id": "mock-empty-ui",
+        "intent": "完成测试",
+    })
+    assert response["done"] is True
+    assert response["actions"] == []
+
+
+def test_server_routes_allowlisted_open_app_skill_without_model():
+    srv = _fresh_server()
+    response = srv.agent_run({
+        "protocol_version": "1.0",
+        "session_id": "open-settings",
+        "intent": "打开设置",
+    })
+    assert response["done"] is True
+    assert response["actions"] == [{"type": "launch", "package_name": "com.android.settings"}]
+
+
+def test_server_routes_english_open_settings_skill_without_model():
+    srv = _fresh_server()
+    response = srv.agent_run({
+        "protocol_version": "1.0",
+        "session_id": "open-settings-en",
+        "intent": "open settings",
+    })
+    assert response["done"] is True
+    assert response["actions"] == [{"type": "launch", "package_name": "com.android.settings"}]
