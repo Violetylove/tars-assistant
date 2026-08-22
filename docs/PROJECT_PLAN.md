@@ -185,3 +185,5 @@
 | 2026-08-22 | AVD 旧包清理：经用户明确授权，卸载迁移前 `com.tars.assistant`，清除其本地数据与系统授权；核验仅保留新包 `org.atovio.tars`，未影响 Shizuku、Termux 或项目文件。 |
 | 2026-08-22 | Android 新包迁移回归：`org.atovio.tars` 已重新授予无障碍与 Shizuku API 权限；无副作用 `open settings` 固定技能实际打开系统设置，返回回执正确显示新包名与 `launch (com.android.settings)`。 |
 | 2026-08-22 | 设备内云端失败收敛：新包的受控 Gmail 输入任务在 Termux 调用云端时触发 `ConnectionError`；有界重试 2 次后 App 收到 502，未产生任何 Gmail 动作。Windows 正常探针表明问题为 AVD Termux 外网出口，待恢复后复验。 |
+| 2026-08-22 | 设备内代理链清理：移除遗留 ADB `tcp:10000` 转发并结束旧 Agent；Termux 新会话清除 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY` 后，Agent 在 `127.0.0.1:8080` 运行并成功直连国内云端模型。 |
+| 2026-08-22 | Gmail 受控输入复验：新包成功启动 Gmail 并聚焦收件人字段，但字段仍为空；未选择联系人、未填写主题/正文、未发送。当前待确认云端是否继续生成通用 `type` 动作，不新增 Gmail 专用适配。 |

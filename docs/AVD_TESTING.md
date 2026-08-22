@@ -3,9 +3,9 @@
 ## 当前基线
 
 - AVD：`TARS_MODEL_API_35`，Android 15 / Google APIs / x86_64 / Pixel 5，6 vCPU、6 GB RAM、16 GB 数据盘。
-- Android App：`com.tars.assistant` Debug APK；无障碍、通知访问、麦克风和 Shizuku 授权按需由用户在系统 UI 中确认。
-- Android 命名空间迁移已完成代码调整，目标包名为 `org.atovio.tars`；本记录中的 `com.tars.assistant`
-  是迁移前已安装 APK 的历史验收事实。新包 Debug APK 已构建并安装；迁移前旧包已在 AVD 卸载，尚待重新进行系统授权。
+- Android App：`org.atovio.tars` Debug APK；无障碍、通知访问、麦克风和 Shizuku 授权按需由用户在系统 UI 中确认。
+- Android 命名空间迁移已完成；迁移前的 `com.tars.assistant` 仅保留为历史验收事实，旧包已从 AVD 卸载。
+  当前 `org.atovio.tars` Debug APK 已安装，并已重新获得无障碍与 Shizuku 授权。
 - Termux：官方 `v0.118.3` x86_64；保留 `~/tars-assistant` 与 `.venv`，用于运行自研 Python Agent。
 - 通信：Android App 仅访问本机 `http://127.0.0.1:8080`；Termux Agent 通过 HTTPS 访问云端 OpenAI-compatible 模型 API。
 
@@ -36,7 +36,8 @@
 16. [x] 在绑定的无障碍服务下采集系统设置原始树，得到 21,695 字节 XML，含 `com.android.settings`、可交互节点和 bounds；正式选定无障碍直接序列化作为 UI 采集主路径。
 17. [x] 重建并覆盖安装通用动作轨迹版本；发送 `open settings` 后实际进入 `com.android.settings`，返回 TARS 后回执显示 `第 1 轮前台：com.tars.assistant` 和 `已执行: launch (com.android.settings)`，未触发第三方 App 或敏感操作。
 18. [x] 迁移后的 `org.atovio.tars` 已重新授予无障碍和 Shizuku API 权限；`open settings` 实际进入 `com.android.settings`，回执显示 `第 1 轮前台：org.atovio.tars` 与 `已执行: launch (com.android.settings)`。
-19. [x] 新包的受控 Gmail 输入任务在设备内 Agent 调用云端时出现 `ConnectionError`；按配置重试 2 次后返回 502，执行侧未下发任何 Gmail 动作并安全停止。Windows 侧正常云端探针已排除服务商配置，待恢复 AVD Termux 外网出口后复验。
+19. [x] 清除遗留的 ADB `tcp:10000` 转发并重启 Termux Agent；取消 `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` 后，设备内 Agent 直接访问国内云端模型成功，`127.0.0.1:10000` 不再监听。
+20. [~] 受控 Gmail 输入任务已启动 Gmail 并聚焦收件人输入框；当前 UI 仍为空，尚未确认云端是否继续生成或执行 `type`，未填写主题/正文、未选择联系人、未发送邮件。该结果不能归因于 Shizuku 输入失败。
 
 ## 已完成验收
 
@@ -56,3 +57,5 @@
 - 执行失败收敛验收：当前 APK 包含逐动作结构化结果；取消、拒绝或失败会使执行结果标记为未完成，主循环在记录 history 和请求下一轮前立即停止。受控任务仅允许模型点击 TARS 自身的“发送给 TARS”按钮，确认弹窗出现后选择取消，最终状态为“已取消: click”；Termux 日志仅新增本轮一次 `POST /agent/run 200`，未产生后续观察请求。
 - UI 采集方案验收：在 TARS 无障碍服务已绑定时，跨应用系统设置原始树为 21,695 字节，含正确包名、可交互节点和 bounds。选定 `AccessibilityNodeInfo` 直接序列化（方案 B）为当前主路径；它无需 Shizuku 文件导出，方案 A 仅保留为未来受限备用。
 - 多轮观察验收：临时确定性 Termux 服务的第一轮只启动系统设置并请求观察；执行侧仅在当前 UI XML 与首轮快照不同后才发起第二轮。探针记录确认第二轮使用同一会话，含 `app=com.android.settings`、系统设置的原始 UI XML 与首轮 `launch` history；真实云端 Agent 已在测试结束后恢复。
+- 设备内云端无代理验收：移除遗留 ADB `tcp:10000` 转发并清除 Termux 代理环境变量后，Agent 进程保持监听 `127.0.0.1:8080`，无 UI、无动作请求经 HTTPS 直连国内云端模型成功；Android 与 Agent 的 loopback 通信仍固定使用 8080。
+- Gmail 受控输入阶段结果：真实云端动作链成功启动 Gmail 并将收件人字段置于焦点，但当前字段仍为空；测试严格未选择联系人、未填写主题或正文、未点击发送。下一步需用更明确的通用任务描述确认模型是否继续返回 `type`，再判断执行层表现。
