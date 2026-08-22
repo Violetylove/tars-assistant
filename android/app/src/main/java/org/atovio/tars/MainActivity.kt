@@ -239,7 +239,7 @@ class MainActivity : Activity() {
         checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
     companion object {
-        private const val MAX_OBSERVATION_ROUNDS = 8
+        private const val MAX_OBSERVATION_ROUNDS = 12
         private const val OBSERVATION_TIMEOUT_MS = 2_000L
         private const val UNKNOWN_FOREGROUND = "未知"
         private const val FIFTEEN_MINUTES_MS = 15 * 60 * 1000L
