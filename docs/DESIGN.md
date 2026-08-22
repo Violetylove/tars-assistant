@@ -72,6 +72,7 @@ Agent 经 HTTPS 调用云端模型 API，并发送任务文本与压缩后的 UI
 | `/health` | GET | 存活检查（原生 App 联调用） |
 
 - 仅监听 `127.0.0.1`（Termux 本地回环），不暴露局域网；Android 客户端固定为 `http://127.0.0.1:8080`（Manifest 为此受限 loopback 用途启用 cleartext，客户端拒绝任何非 loopback endpoint）。服务应以 `python -m agent.server` 启动：`--mock` 仅做协议联调，默认模式经 HTTPS 调用云端模型。
+- Android 客户端对该 loopback 请求显式禁用系统 HTTP 代理（`Proxy.NO_PROXY`）；邮件等第三方 App 可使用系统代理，但代理不得接管 App↔Agent 本机通信。
 - `Content-Type: application/json`，UTF-8
 - 未知字段忽略；必填字段缺失或非法 → 400 + 结构化错误
 
@@ -97,7 +98,7 @@ Agent 经 HTTPS 调用云端模型 API，并发送任务文本与压缩后的 UI
 | app | string | 否 | 无障碍事件记录的最近前台应用包名；服务刚连接或未收到事件时省略 |
 | activity | string | 否 | 无障碍事件记录的最近前台窗口类名；服务刚连接或未收到事件时省略 |
 | ui_xml | string | 否 | 当前 UI 树原始 XML；未采集到 UI 树时可省略或传空字符串，Agent 按空节点安全决策；后续轮由 need_observation 驱动重采 |
-| history | array | 否 | 原生侧回传的前序动作记录，最多 3 轮、每轮最多 8 个合法 action；服务端不缓存会话状态 |
+| history | array | 否 | 原生侧回传的前序动作记录，最多 7 轮、每轮最多 8 个合法 action；服务端不缓存会话状态 |
 
 ### 5.3 `ui_tree`（Agent 内部结构，调试/执行用）
 
@@ -149,6 +150,10 @@ LLM 视角的紧凑行格式：`[12] 按钮"发送" (450,900)`——供 prompt �
 | actions | array | 否 | 待执行动作列表（有序执行；最多 8 个；为空表示无动作） |
 | need_observation | bool | 否 | true = 原生 App 执行后轮询直至 UI XML 与动作前快照不同，再重采回传（进入下一轮）；2 秒内无更新则安全停止 |
 
+原生 App 的任务结果展示每轮的前台包名、已执行的动作类型及其节点编号（`click` / `type`），并记录是否
+观察到 UI 更新或达到观察上限。该轨迹不回显 `type` 的输入文本、滑动坐标或原始 UI 内容；它用于区分执行层
+已成功与后续模型规划导致的前台变化，不作为 Agent 决策输入。
+
 ### 5.5 `action` 类型
 
 | type | 参数 | 执行通道 | 说明 |
@@ -168,9 +173,15 @@ LLM 视角的紧凑行格式：`[12] 按钮"发送" (450,900)`——供 prompt �
 模型若以单对象 `{"type":"reply","text":"..."}` 输出答复，Agent 将其规范化为 `done=true`、
 `reply` 填入该文本且 `actions=[]` 的终态响应；该文本不会作为 Android 可执行动作下发，也不会触发额外观察轮次。
 
-`launch` 仅由 Agent 侧固定技能路由生成，当前白名单为系统设置、TARS Assistant 与微信；Android
+`launch` 仅由 Agent 侧固定技能路由生成，当前白名单为系统设置、TARS Assistant、Gmail 与微信；Android
 执行侧再次校验包名，并只使用 `PackageManager.getLaunchIntentForPackage()` 创建启动 Intent。未知应用、
 未安装应用和任何任意 Intent/命令均拒绝，不提供模型可控的组件、URI 或 shell 参数。
+对于非系统白名单应用，Manifest 仅以 `<queries>` 声明 Gmail 与微信的包可见性，使包管理器能够读取
+启动 Intent；该声明不是额外权限，也不扩大上述运行时包名白名单。
+
+跨应用表单遵循统一的 Agent 决策和无障碍动作链，不为 Gmail、微信或其他第三方 App 定制状态机；
+它们仅可作为受控测试载体。所有 `type`、`click` 动作仍只能引用当前 UI 节点，发送等敏感点击仍必须
+经过 Android 侧确认。
 
 ### 5.6 触发任务的用户审查
 
@@ -201,9 +212,15 @@ UI 采集方案（D2，AVD 实测后已定）：
 | 通道 | 覆盖动作 | 授权 | 库 |
 |------|----------|------|-----|
 | 无障碍服务 | click（普通）、back/home 全局动作 | 无障碍服务开关 | `AccessibilityService` |
-| Shizuku | 参数受限的 input swipe（一期实现） | Shizuku 授权（starter/无线调试） | `dev.rikka.shizuku` 官方 UserService + AIDL |
+| Shizuku | 参数受限的 `input swipe`、`input text` 回退 | Shizuku 授权（starter/无线调试） | `dev.rikka.shizuku` 官方 UserService + AIDL |
 
-原生 App 作为执行侧统一调度两通道：普通动作走无障碍（无需额外权限逻辑），高权限走 Shizuku。Shizuku UserService 仅暴露已定义的动作方法；当前仅允许坐标和时长均通过 App 校验的 swipe，不传递 LLM 生成的 shell 命令。
+原生 App 作为执行侧统一调度两通道：普通动作优先走无障碍（无需额外权限逻辑）；若 `type` 的
+`ACTION_SET_TEXT` 失败，才以已授权 Shizuku 的 `input text` 回退。Shizuku UserService 仅暴露已定义的
+动作方法；`swipe` 的坐标/时长和 `text` 的长度均由 App 校验，文本作为 `ProcessBuilder` 的独立参数传递，
+不传递 LLM 生成的 shell 命令。
+
+Shizuku UserService 的首次绑定在有界等待窗口内监听 Binder 回调；服务就绪即执行当前受限动作，超时则
+返回失败并按执行层的失败收敛规则停止，避免首次高权限动作因固定等待时序被误判失败。
 
 ### 7.2 三层安全兜底
 
@@ -244,5 +261,5 @@ Python 包。后续可将其作为 Python 决策层的编排实现，但不改�
 - [x] UI 采集方案 A/B 实测定夺：选定方案 B（无障碍 `AccessibilityNodeInfo` 直接序列化）；AVD 跨应用系统设置实测可获得包名、可交互节点和 bounds，无需 Shizuku 文件导出
 - [x] 每轮执行后仅在 UI XML 实际变化后重采（AVD 两轮系统设置探针验证；2 秒无变化安全停止）
 - [ ] 常驻唤醒词：二期评估（受 Android 权限硬约束，D11 已排除一期）
-- [x] 会话历史由原生 App 回传：最多四轮决策，历史最多三轮且只含已执行的合法 action；Agent 保持无状态，重启不会残留任务上下文
+- [x] 会话历史由原生 App 回传：最多八轮决策，历史最多七轮且只含已执行的合法 action；Agent 保持无状态，重启不会残留任务上下文
 - [ ] 云端模型服务商的超时、额度与失败重试策略实测标定

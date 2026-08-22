@@ -11,9 +11,21 @@ _LAUNCH_SKILLS = {
     "system settings": ("com.android.settings", "正在打开系统设置"),
     "settings": ("com.android.settings", "正在打开系统设置"),
     "tars": ("com.tars.assistant", "正在打开 TARS Assistant"),
+    "gmail": ("com.google.android.gm", "正在打开 Gmail"),
     "微信": ("com.tencent.mm", "正在打开微信"),
     "wechat": ("com.tencent.mm", "正在打开微信"),
 }
+
+
+def _response(session_id: str, reply: str, actions: list[dict], *, done: bool, observe: bool) -> dict:
+    return {
+        "protocol_version": PROTOCOL_VERSION,
+        "session_id": session_id,
+        "done": done,
+        "reply": reply,
+        "actions": actions,
+        "need_observation": observe,
+    }
 
 
 def route_fixed_skill(*, session_id: str, intent: str) -> Optional[dict]:
@@ -26,11 +38,4 @@ def route_fixed_skill(*, session_id: str, intent: str) -> Optional[dict]:
     if skill is None:
         return None
     package_name, reply = skill
-    return {
-        "protocol_version": PROTOCOL_VERSION,
-        "session_id": session_id,
-        "done": True,
-        "reply": reply,
-        "actions": [{"type": "launch", "package_name": package_name}],
-        "need_observation": False,
-    }
+    return _response(session_id, reply, [{"type": "launch", "package_name": package_name}], done=True, observe=False)

@@ -69,6 +69,23 @@ class ShizukuGateway {
         }
     }
 
+    fun typeText(text: String): Boolean {
+        if (!isAvailable() || text.isEmpty() || text.length > MAX_TEXT_LENGTH) {
+            Log.w(TAG, "Shizuku text input rejected before execution")
+            return false
+        }
+        val service = userService() ?: run {
+            Log.w(TAG, "Shizuku UserService binding timed out")
+            return false
+        }
+        return try {
+            service.typeText(text).also { success -> Log.i(TAG, "Shizuku text input success=$success") }
+        } catch (error: Throwable) {
+            Log.w(TAG, "Shizuku UserService text input failed", error)
+            false
+        }
+    }
+
     private fun userService(): IInputService? {
         remote?.let { return it }
         synchronized(lock) {
@@ -83,7 +100,12 @@ class ShizukuGateway {
                 Log.w(TAG, "Shizuku UserService bind failed", error)
                 return null
             }
-            lock.wait(BIND_TIMEOUT_MS)
+            val deadline = android.os.SystemClock.elapsedRealtime() + BIND_TIMEOUT_MS
+            while (remote == null) {
+                val remaining = deadline - android.os.SystemClock.elapsedRealtime()
+                if (remaining <= 0) break
+                lock.wait(remaining)
+            }
             return remote
         }
     }
@@ -91,5 +113,6 @@ class ShizukuGateway {
     companion object {
         private const val TAG = "TarsShizuku"
         private const val BIND_TIMEOUT_MS = 3_000L
+        private const val MAX_TEXT_LENGTH = 2_000
     }
 }

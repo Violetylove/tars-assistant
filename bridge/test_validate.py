@@ -54,9 +54,15 @@ def test_task_request_rejects_unvalidated_history_action():
     assert validate(req, "task_request")
 
 
+def test_task_request_accepts_seven_history_entries():
+    req = _load("task_request.json")
+    req["history"] = [{"actions": []}] * 7
+    assert validate(req, "task_request") == []
+
+
 def test_task_request_rejects_oversized_history():
     req = _load("task_request.json")
-    req["history"] = [{"actions": []}] * 4
+    req["history"] = [{"actions": []}] * 8
     assert validate(req, "task_request")
 
 

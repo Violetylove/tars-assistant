@@ -15,6 +15,16 @@ class ShellInputUserService : IInputService.Stub() {
         false
     }
 
+    override fun typeText(text: String): Boolean = try {
+        val exitCode = ProcessBuilder("/system/bin/input", "text", text).start().waitFor()
+        if (exitCode != 0) Log.w(TAG, "input text exited with code $exitCode")
+        else Log.i(TAG, "input text completed")
+        exitCode == 0
+    } catch (error: Exception) {
+        Log.w(TAG, "input text process failed", error)
+        false
+    }
+
     override fun destroy() = Unit
 
     companion object { private const val TAG = "TarsShizuku" }

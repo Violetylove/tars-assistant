@@ -209,7 +209,7 @@ def run_decision_loop(
     ui_xml: str,
     app: Optional[str] = None,
     activity: Optional[str] = None,
-    max_steps: int = 4,
+    max_steps: int = 8,
     on_step: Optional[callable] = None,
 ) -> dict:
     """完整决策循环（可多轮）。返回最终 agent_response。

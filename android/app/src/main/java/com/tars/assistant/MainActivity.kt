@@ -27,11 +27,13 @@ class MainActivity : Activity() {
     private lateinit var intentInput: EditText
     private lateinit var voice: VoiceIntentCapture
     @Volatile private var requestInFlight = false
+    @Volatile private var taskResultVisible = false
     private val triggerReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == TarsAccessibilityService.ACTION_CONNECTED) {
-                if (!requestInFlight) status.text = "无障碍服务已连接"
+                if (!requestInFlight && !taskResultVisible) status.text = "无障碍服务已连接"
             } else {
+                taskResultVisible = false
                 status.text = "有待处理任务，请点击“载入待处理任务”后检查"
             }
         }
@@ -57,6 +59,7 @@ class MainActivity : Activity() {
             if (intent.isEmpty()) { status.text = "请输入任务意图"; return@setOnClickListener }
             run.isEnabled = false
             requestInFlight = true
+            taskResultVisible = false
             status.text = "云端模型推理中，请稍候"
             executor.execute {
                 try {
@@ -64,8 +67,11 @@ class MainActivity : Activity() {
                     val history = JSONArray()
                     val sessionId = java.util.UUID.randomUUID().toString()
                     val output = mutableListOf<String>()
+                    var reachedRoundLimit = true
                     for (round in 0 until MAX_OBSERVATION_ROUNDS) {
                         val uiXml = service?.currentUiXml().orEmpty()
+                        val foreground = service?.currentAppPackage() ?: UNKNOWN_FOREGROUND
+                        output += "第 ${round + 1} 轮前台：$foreground"
                         val response = client.run(TaskRequest(
                             intent = intent,
                             app = service?.currentAppPackage(),
@@ -78,18 +84,35 @@ class MainActivity : Activity() {
                         val execution = service?.execute(response.actions, ::confirmAction)
                             ?: ActionExecutor.ExecutionSummary(listOf("无障碍服务未连接"), completed = false)
                         output += execution.messages
-                        if (!execution.completed) break
+                        if (!execution.completed) {
+                            reachedRoundLimit = false
+                            break
+                        }
                         history.put(JSONObject().put("actions", response.actions.toJsonArray()))
-                        if (response.done || !response.needObservation || response.actions.isEmpty()) break
+                        if (response.done || !response.needObservation || response.actions.isEmpty()) {
+                            reachedRoundLimit = false
+                            break
+                        }
                         if (service == null || !service.awaitFreshUiAfter(
                                 uiXml, OBSERVATION_TIMEOUT_MS,
                             )) {
                             output += "未观察到界面更新，已停止任务"
+                            reachedRoundLimit = false
                             break
                         }
+                        output += "界面已更新，进入下一轮（前台：${service.currentAppPackage() ?: UNKNOWN_FOREGROUND}）"
                     }
-                    runOnUiThread { status.text = output.joinToString("\n") }
-                } catch (e: Exception) { runOnUiThread { status.text = "请求失败: ${e.message}" } }
+                    if (reachedRoundLimit) output += "已达到最大观察轮数，已停止任务"
+                    runOnUiThread {
+                        taskResultVisible = true
+                        status.text = output.joinToString("\n")
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        taskResultVisible = true
+                        status.text = "请求失败: ${e.message}"
+                    }
+                }
                 finally {
                     requestInFlight = false
                     runOnUiThread { run.isEnabled = true }
@@ -164,7 +187,9 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (TarsAccessibilityService.instance != null) status.text = "无障碍服务已连接"
+        if (TarsAccessibilityService.instance != null && !requestInFlight && !taskResultVisible) {
+            status.text = "无障碍服务已连接"
+        }
     }
 
     override fun onDestroy() { voice.destroy(); executor.shutdownNow(); super.onDestroy() }
@@ -198,6 +223,7 @@ class MainActivity : Activity() {
     private fun loadPendingTrigger() {
         PendingTriggerStore.take(this)?.let {
             intentInput.setText(it)
+            taskResultVisible = false
             status.text = "已载入待处理任务，请检查后发送"
         } ?: run { status.text = "没有待处理任务" }
     }
@@ -213,8 +239,9 @@ class MainActivity : Activity() {
         checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
     companion object {
-        private const val MAX_OBSERVATION_ROUNDS = 4
+        private const val MAX_OBSERVATION_ROUNDS = 8
         private const val OBSERVATION_TIMEOUT_MS = 2_000L
+        private const val UNKNOWN_FOREGROUND = "未知"
         private const val FIFTEEN_MINUTES_MS = 15 * 60 * 1000L
         private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 1002
         private const val MICROPHONE_PERMISSION_REQUEST_CODE = 1003

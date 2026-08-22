@@ -28,7 +28,8 @@ class TarsAccessibilityService : AccessibilityService() {
 
     fun currentUiXml(): String = rootInActiveWindow?.let { UiTreeXml.serialize(it) } ?: ""
 
-    fun currentAppPackage(): String? = foregroundPackage
+    fun currentAppPackage(): String? = rootInActiveWindow?.packageName?.toString()
+        ?.takeIf { it.isNotBlank() } ?: foregroundPackage
 
     fun currentActivity(): String? = foregroundActivity
 
@@ -83,6 +84,7 @@ private object UiTreeXml {
         attribute("text", node.text?.toString().orEmpty())
         attribute("content-desc", node.contentDescription?.toString().orEmpty())
         attribute("class", node.className?.toString().orEmpty())
+        attribute("resource-id", node.viewIdResourceName.orEmpty())
         attribute("package", node.packageName?.toString().orEmpty())
         attribute("clickable", node.isClickable.toString())
         attribute("focusable", node.isFocusable.toString())

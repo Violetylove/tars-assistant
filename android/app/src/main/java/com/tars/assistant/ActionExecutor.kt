@@ -31,7 +31,7 @@ class ActionExecutor(
                 results += "执行失败: ${action.type}"
                 return ExecutionSummary(results, completed = false)
             }
-            results += "已执行: ${action.type}"
+            results += "已执行: ${actionTrace(action)}"
         }
         return ExecutionSummary(results, completed = true)
     }
@@ -59,8 +59,10 @@ class ActionExecutor(
         return when (action.type) {
             "click" -> findNode(action.targetNodeId)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
             "type" -> findNode(action.targetNodeId)?.let { node ->
-                if (!node.isFocused) node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-                node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, action.text.orEmpty()) })
+                val focused = node.isFocused || node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+                focused && (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
+                    putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, action.text.orEmpty())
+                }) || shizuku.typeText(action.text.orEmpty()))
             } == true
             "back" -> service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
             "home" -> service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
@@ -76,6 +78,13 @@ class ActionExecutor(
             "swipe" -> shizuku.swipe(action)
             else -> false
         }
+    }
+
+    /** Keeps task traces useful without echoing user-entered text or swipe coordinates. */
+    private fun actionTrace(action: AgentAction): String = when (action.type) {
+        "click", "type" -> "${action.type} (节点 #${action.targetNodeId})"
+        "launch" -> "launch (${action.packageName})"
+        else -> action.type
     }
 
     private fun findNode(id: Int?): AccessibilityNodeInfo? {
@@ -109,7 +118,12 @@ class ActionExecutor(
 
     companion object {
         private val ALLOWED = setOf("click", "type", "swipe", "back", "home", "launch", "wait", "reply", "done")
-        private val LAUNCHABLE_PACKAGES = setOf("com.android.settings", "com.tars.assistant", "com.tencent.mm")
+        private val LAUNCHABLE_PACKAGES = setOf(
+            "com.android.settings",
+            "com.tars.assistant",
+            "com.google.android.gm",
+            "com.tencent.mm",
+        )
         private val SENSITIVE_LABELS = setOf("发送", "删除", "清除", "支付", "付款", "转账", "send", "delete", "pay")
     }
 }

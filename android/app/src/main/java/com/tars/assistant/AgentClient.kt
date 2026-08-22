@@ -2,6 +2,7 @@ package com.tars.assistant
 
 import org.json.JSONObject
 import java.net.HttpURLConnection
+import java.net.Proxy
 import java.net.URI
 import java.net.URL
 
@@ -24,7 +25,9 @@ class AgentClient(private val baseUrl: String = "http://127.0.0.1:8080") {
     }
 
     private fun request(method: String, path: String, payload: JSONObject?): Pair<Int, String> {
-        val conn = (URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection).apply {
+        // The Android-wide proxy may be needed by Gmail or the cloud model, but the
+        // App-to-Agent contract is always same-device loopback and must stay direct.
+        val conn = (URL(baseUrl.trimEnd('/') + path).openConnection(Proxy.NO_PROXY) as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = 5_000
             readTimeout = MODEL_REQUEST_TIMEOUT_MS

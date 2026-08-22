@@ -8,12 +8,13 @@
 - 无障碍服务连接后会在主界面显示已连接状态
 - `ActionExecutor` 执行 click/type/back/home/wait；未知动作默认拒绝
 - 任一动作被拒绝、取消或失败时，执行侧立即停止该轮，不再下发后续动作或观察请求
+- 任务的最终执行结果或失败信息会保留在主界面，不会被后续无障碍连接广播覆盖
 - 需要下一轮观察时，执行侧轮询直到动作后 UI XML 与原快照不同；2 秒内无更新则安全停止，避免传回陈旧或过渡 UI
-- `launch` 仅可启动系统设置、TARS Assistant 或微信；包名在 Agent 固定路由和 Android 执行侧均有白名单校验
-- `ShizukuGateway` 用官方 UserService + AIDL 执行参数受限的 `input swipe`，需用户显式授权
+- `launch` 仅可启动系统设置、TARS Assistant、Gmail 或微信；包名在 Agent 固定路由和 Android 执行侧均有白名单校验
+- `ShizukuGateway` 用官方 UserService + AIDL 执行参数受限的 `input swipe`；当无障碍文本设置失败时，以 `input text` 回退，需用户显式授权
 - `VoiceIntentCapture` 使用原生 `SpeechRecognizer`；按住说话只填入任务意图，用户仍须检查并发送
 - 悬浮语音由已授权的无障碍服务创建 `TYPE_ACCESSIBILITY_OVERLAY` 按钮；按住识别的最终结果仅写入待处理任务，用户须在 App 中载入、检查并发送
-- `MainActivity` 提供手动任务入口，并按 `need_observation` 最多推进 4 轮
+- `MainActivity` 提供手动任务入口，并按 `need_observation` 最多推进 8 轮
 
 使用 Android Studio 打开本目录并同步 Gradle，或在此目录运行
 `gradlew.bat :app:assembleDebug`。Debug APK 输出到
@@ -28,3 +29,5 @@ Shizuku”并在 Shizuku 弹窗确认；服务不可用、未授权或参数非�
 
 Android 的 cleartext 默认策略会阻止 HTTP，因此 Manifest 明确启用了 cleartext。`AgentClient`
 同时强制端点只能是 `http://127.0.0.1:8080` 或 `http://[::1]:8080`，不能配置到远程主机。
+即使设备设置了全局 HTTP 代理，客户端也会对该 loopback 请求显式使用 `Proxy.NO_PROXY`，避免代理
+错误接管 App↔Agent 的本机通信。

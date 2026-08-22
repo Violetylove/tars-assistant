@@ -127,7 +127,7 @@ SCHEMAS = {
             "history": {
                 "type": "array",
                 "items": _ref("history_entry"),
-                "maxItems": 3,
+                "maxItems": 7,
             },
         },
         "required": [
