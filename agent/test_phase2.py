@@ -313,6 +313,19 @@ def test_server_rejects_bad_request():
     assert "task_request 校验失败" in r.json()["detail"]
 
 
+def test_server_rejects_invalid_nonempty_ui_xml():
+    srv = _fresh_server()
+    client = TestClient(srv.app)
+    r = client.post("/agent/run", json={
+        "protocol_version": "1.0",
+        "session_id": "bad-ui",
+        "intent": "测试",
+        "ui_xml": "<hierarchy>",
+    })
+    assert r.status_code == 400
+    assert "不是合法 XML" in r.json()["detail"]
+
+
 def test_server_unconfigured_runtime_fails_closed():
     srv = _fresh_server()
     response = srv.agent_run({

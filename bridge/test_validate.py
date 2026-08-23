@@ -104,3 +104,16 @@ def test_action_swipe_requires_coords_ok():
     assert validate_action(
         {"type": "swipe", "x1": 0, "y1": 0, "x2": 100, "y2": 200, "duration_ms": 300}
     ) == []
+
+
+def test_action_type_specific_required_fields():
+    invalid_actions = [
+        {"type": "click"},
+        {"type": "type", "target_node_id": 1},
+        {"type": "swipe", "x1": 0, "y1": 0, "x2": 1, "y2": 1},
+        {"type": "wait"},
+        {"type": "reply"},
+        {"type": "launch"},
+    ]
+    for action in invalid_actions:
+        assert validate_action(action), f"应拒绝不完整 action: {action}"

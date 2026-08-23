@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import logging
 import re
+import xml.etree.ElementTree as ET
 from typing import Callable
 
 from fastapi import FastAPI, HTTPException
@@ -115,11 +116,17 @@ def agent_run(req: dict) -> dict:
     errs = validate(req, "task_request")
     if errs:
         raise HTTPException(status_code=400, detail=f"task_request 校验失败: {'; '.join(errs[:5])}")
+    ui_xml = req.get("ui_xml") or ""
+    if ui_xml.strip():
+        try:
+            ET.fromstring(ui_xml)
+        except ET.ParseError as exc:
+            raise HTTPException(status_code=400, detail=f"ui_xml 不是合法 XML: {exc}") from exc
 
     logger.info(
         "agent request session=%s app=%s activity=%s nodes=%d history_rounds=%d",
         req["session_id"], req.get("app") or "-", req.get("activity") or "-",
-        req.get("ui_xml", "").count("<node"), len(req.get("history") or []),
+        ui_xml.count("<node"), len(req.get("history") or []),
     )
     # === DIAG (temporary): expose request content to diagnose occluder handling ===
     diag_xml = req.get("ui_xml") or ""
@@ -166,7 +173,6 @@ def agent_run(req: dict) -> dict:
             req["session_id"], req.get("app"), len(diag_xml),
         )
     # === END DIAG ===
-
     try:
         fixed_response = route_fixed_skill(session_id=req["session_id"], intent=req["intent"])
         if fixed_response is not None:

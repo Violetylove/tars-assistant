@@ -14,7 +14,7 @@
 - `ShizukuGateway` 用官方 UserService + AIDL 执行参数受限的 `input swipe`；当无障碍文本设置失败时，以 `input text` 回退，需用户显式授权
 - `VoiceIntentCapture` 使用原生 `SpeechRecognizer`；按住说话只填入任务意图，用户仍须检查并发送
 - 悬浮语音由已授权的无障碍服务创建 `TYPE_ACCESSIBILITY_OVERLAY` 按钮；按住识别的最终结果仅写入待处理任务，用户须在 App 中载入、检查并发送
-- `MainActivity` 提供手动任务入口，并按 `need_observation` 最多推进 8 轮
+- `MainActivity` 提供手动任务入口，并按 `need_observation` 最多推进 12 轮
 
 使用 Android Studio 打开本目录并同步 Gradle，或在此目录运行
 `gradlew.bat :app:assembleDebug`。Debug APK 输出到

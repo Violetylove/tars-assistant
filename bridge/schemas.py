@@ -56,6 +56,26 @@ _COMMON_DEFS = {
                 "if": {"properties": {"type": {"const": "launch"}}},
                 "then": {"required": ["package_name"]},
             },
+            {
+                "if": {"properties": {"type": {"const": "click"}}},
+                "then": {"required": ["target_node_id"]},
+            },
+            {
+                "if": {"properties": {"type": {"const": "type"}}},
+                "then": {"required": ["target_node_id", "text"]},
+            },
+            {
+                "if": {"properties": {"type": {"const": "swipe"}}},
+                "then": {"required": ["x1", "y1", "x2", "y2", "duration_ms"]},
+            },
+            {
+                "if": {"properties": {"type": {"const": "wait"}}},
+                "then": {"required": ["ms"]},
+            },
+            {
+                "if": {"properties": {"type": {"const": "reply"}}},
+                "then": {"required": ["text"]},
+            },
         ],
     },
     "ui_node": {
