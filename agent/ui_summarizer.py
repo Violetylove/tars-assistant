@@ -63,6 +63,12 @@ class Summarizer:
         任一已覆盖矩形完全包含则剔除（视觉不可见），与执行侧 collectVisibleNodes 一致。
         """
         root = ET.fromstring(xml)
+        # 视口：Android 无障碍服务在 <hierarchy> 根上写出屏幕尺寸与软键盘(IME)区域。
+        # IME 不在 UI 树里（是独立输入法窗口），必须显式给出，摘要器才能判断底部内容被键盘覆盖。
+        screen_w = _int_attr(root, "screen_w")
+        screen_h = _int_attr(root, "screen_h")
+        ime_visible = (root.get("ime_visible") or "").strip().lower() == "true"
+        ime_top = _int_attr(root, "ime_top")
         # (layer, node) 分组：解析 <window layer="N"> 层级
         layered: list[tuple[int, ET.Element]] = []
         current_layer = 0
@@ -96,6 +102,8 @@ class Summarizer:
         nodes: List[dict] = []
         for _layer, elem, _bounds in kept:
             text = self._semantic_text(elem)
+            # 可见性标注：出屏 / 被键盘覆盖 → 当前不可操作，让模型知道不要点它。
+            reason = self._occlusion_reason(_bounds, screen_w, screen_h, ime_visible, ime_top)
             nodes.append({
                 "id": len(nodes),  # 摘要内唯一序号
                 "type": self._classify(elem),
@@ -103,6 +111,8 @@ class Summarizer:
                 "bounds": list(_bounds),
                 "clickable": _is_true(elem.get("clickable")),
                 "focused": _is_true(elem.get("focused")),
+                "occluded": reason,
+                "visible": reason is None,
             })
 
         # 排序：先上→下，再左→右（bounds 为 [x1,y1,x2,y2]）
@@ -122,6 +132,24 @@ class Summarizer:
             cx1 <= x1 and cy1 <= y1 and cx2 >= x2 and cy2 >= y2
             for cx1, cy1, cx2, cy2 in covered
         )
+
+    @staticmethod
+    def _occlusion_reason(bounds, screen_w, screen_h, ime_visible, ime_top):
+        """节点当前是否视觉不可见（不可操作）。返回 None 表示可见，否则返回原因字符串。
+
+        通用三类遮挡（不认具体组件）：
+        - 出屏：bounds 超出屏幕边界；
+        - 键盘覆盖：软键盘展开且节点落在键盘区域（IME 不在 UI 树里，需 screen 元信息）；
+        - 跨层覆盖：已被上层节点完全覆盖（本可剔除，这里作为标注保留给模型信息）。
+        """
+        x1, y1, x2, y2 = bounds
+        if screen_h and y2 > screen_h:
+            return "出屏"
+        if screen_w and x2 > screen_w:
+            return "出屏"
+        if ime_visible and ime_top and y2 > ime_top:
+            return "键盘遮挡"
+        return None
 
     def _is_interactive(self, elem: dict, bounds) -> bool:
         # 超出可视范围（负坐标部分像素在屏幕外）的忽略，防误点
@@ -183,6 +211,15 @@ def _is_true(v) -> bool:
     return str(v).strip().lower() == "true"
 
 
+def _int_attr(elem, name: str) -> int:
+    """读取元素属性为 int；缺失/非法返回 0。"""
+    raw = (elem.get(name) or "").strip()
+    try:
+        return int(raw) if raw else 0
+    except ValueError:
+        return 0
+
+
 def summarize_xml(xml: str, max_nodes: int = MAX_NODES) -> List[dict]:
     """便捷单例接口，供 agent 决策循环 / server 直接调用。"""
     # 无障碍服务尚未连接时，首轮请求可能没有 UI 树；按空屏处理。
@@ -198,7 +235,11 @@ def to_llm_line(node: dict) -> str:
     if node.get("focused"):
         typ = f"{typ}(focused)"
     label = node.get("text") or ""
-    return f"[{node['id']}] {typ}\"{label}\" ({cx},{cy})"
+    line = f"[{node['id']}] {typ}\"{label}\" ({cx},{cy})"
+    reason = node.get("occluded")
+    if reason:
+        line += f" [不可见: {reason}]"
+    return line
 
 
 def to_llm_prompt(nodes: List[dict]) -> str:

@@ -48,7 +48,29 @@ class TarsAccessibilityService : AccessibilityService() {
     fun currentUiXml(): String {
         val roots = collectVisibleWindowRoots()
         if (roots.isEmpty()) return ""
-        return UiTreeXml.serializeWindows(roots)
+        val vp = currentViewport()
+        return UiTreeXml.serializeWindows(roots, vp.screenW, vp.screenH, vp.imeVisible, vp.imeTop)
+    }
+
+    /** Screen geometry + soft-keyboard (IME) region, so the Agent summarizer can compute
+     *  per-node visual visibility (off-screen / under-keyboard / covered by an overlay).
+     *  The IME is not part of the accessible UI tree (it is a separate input-method window), so
+     *  its region must be reported explicitly for the summarizer to know content under it is
+     *  not operable.
+     */
+    private fun currentViewport(): Viewport {
+        val dm = resources.displayMetrics
+        var imeVisible = false
+        var imeTop = dm.heightPixels
+        try {
+            val ime = windows?.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+            if (ime != null) {
+                val r = android.graphics.Rect().also { ime.getBoundsInScreen(it) }
+                imeVisible = true
+                imeTop = r.top
+            }
+        } catch (_: Throwable) { }
+        return Viewport(dm.widthPixels, dm.heightPixels, imeVisible, imeTop)
     }
 
     /**
@@ -216,6 +238,8 @@ class TarsAccessibilityService : AccessibilityService() {
 
     val isFloatingVoiceVisible: Boolean get() = floatingVoiceOverlay?.isVisible == true
 
+    private data class Viewport(val screenW: Int, val screenH: Int, val imeVisible: Boolean, val imeTop: Int)
+
     companion object {
         const val ACTION_CONNECTED = "org.atovio.tars.ACCESSIBILITY_CONNECTED"
         @Volatile var instance: TarsAccessibilityService? = null
@@ -236,8 +260,8 @@ private object UiTreeXml {
      * Each window is wrapped in a <window layer="N"> group so that downstream
      * summarizer/parser can see which nodes belong to which layer.
      */
-    fun serializeWindows(roots: List<AccessibilityNodeInfo>): String = buildString {
-        append("<?xml version=\"1.0\" encoding=\"utf-8\"?><hierarchy>")
+    fun serializeWindows(roots: List<AccessibilityNodeInfo>, screenW: Int, screenH: Int, imeVisible: Boolean, imeTop: Int): String = buildString {
+        append("<?xml version=\"1.0\" encoding=\"utf-8\"?><hierarchy screen_w=\"$screenW\" screen_h=\"$screenH\" ime_visible=\"$imeVisible\" ime_top=\"$imeTop\">")
         for ((layer, root) in roots.withIndex()) {
             append("<window layer=\"$layer\">")
             appendNode(root)
