@@ -205,3 +205,44 @@ def to_llm_prompt(nodes: List[dict]) -> str:
     """生成喂给 LLM 的整段紧凑文本（保证 ≤500 token 目标）。"""
     lines = [to_llm_line(n) for n in nodes]
     return "\n".join(lines)
+
+
+def to_llm_context(xml: str, max_chars: int = 4500) -> str:
+    """Expose bounded structural UI facts without assigning semantic roles."""
+    if not (xml or "").strip():
+        return ""
+    root = ET.fromstring(xml)
+    lines: list[str] = ["结构事实（仅原始无障碍属性，不代表语义判断）："]
+
+    def walk(elem: ET.Element, path: list[str], window: str) -> None:
+        if elem.tag == "window":
+            window = f"window#{elem.get('layer', '0')}"
+            path = []
+        if elem.tag == "node":
+            text = (elem.get("text") or "").replace("\n", " ").strip()
+            desc = (elem.get("content-desc") or "").replace("\n", " ").strip()
+            resource_id = elem.get("resource-id") or ""
+            class_name = elem.get("class") or ""
+            package = elem.get("package") or ""
+            bounds = elem.get("bounds") or ""
+            clickable = elem.get("clickable") or "false"
+            focusable = elem.get("focusable") or "false"
+            focused = elem.get("focused") or "false"
+            interesting = text or desc or resource_id or clickable == "true" or focusable == "true" or focused == "true"
+            node_path = "/".join(path[-3:]) or "node"
+            if interesting:
+                attrs = " ".join(
+                    f"{key}={value!r}" for key, value in (
+                        ("text", text), ("desc", desc), ("id", resource_id),
+                        ("class", class_name), ("pkg", package), ("bounds", bounds),
+                        ("clickable", clickable), ("focusable", focusable),
+                        ("focused", focused),
+                    ) if value
+                )
+                lines.append(f"- {window} path={node_path} {attrs}")
+            path = path + [resource_id or class_name or "node"]
+        for child in list(elem):
+            walk(child, path, window)
+
+    walk(root, [], "hierarchy")
+    return "\n".join(lines)[:max_chars]

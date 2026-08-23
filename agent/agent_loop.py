@@ -20,7 +20,7 @@ from typing import Optional
 from bridge.schemas import PROTOCOL_VERSION
 from bridge.validate import validate, validate_action
 from agent.llm_client import MockLLM, extract_json
-from agent.ui_summarizer import summarize_xml, to_llm_prompt
+from agent.ui_summarizer import summarize_xml, to_llm_context, to_llm_prompt
 
 logger = logging.getLogger("tars.agent_loop")
 
@@ -77,8 +77,11 @@ def _build_user_message(
     history: list[dict],
     app: Optional[str] = None,
     activity: Optional[str] = None,
+    ui_context: str = "",
 ) -> str:
     segs = [f"用户意图：{intent}", "当前屏幕节点：", to_llm_prompt(nodes)]
+    if ui_context:
+        segs.extend(["当前屏幕结构事实：", ui_context])
     if app:
         segs.insert(1, f"当前前台应用包名：{app}")
     if activity:
@@ -166,7 +169,10 @@ def decide_once(
     reply=错误说明 + 空 actions（安全拒绝，不抛异常）。
     """
     nodes = summarize_xml(ui_xml)
-    user_msg = _build_user_message(intent, nodes, history or [], app=app, activity=activity)
+    user_msg = _build_user_message(
+        intent, nodes, history or [], app=app, activity=activity,
+        ui_context=to_llm_context(ui_xml),
+    )
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_msg},
