@@ -135,6 +135,18 @@ def test_extract_json_from_plain():
     assert extract_json('{"type":"back"}') == {"type": "back"}
 
 
+def test_summarizer_keeps_zero_size_interactive_nodes_for_id_alignment():
+    xml = (
+        '<hierarchy><node text="零尺寸" class="android.widget.TextView" '
+        'clickable="true" bounds="[0,0][0,0]"/>'
+        '<node text="后续按钮" class="android.widget.Button" '
+        'clickable="true" bounds="[10,10][110,110]"/></hierarchy>'
+    )
+    nodes = summarize_xml(xml)
+    assert [node["text"] for node in nodes] == ["零尺寸", "后续按钮"]
+    assert [node["id"] for node in nodes] == [0, 1]
+
+
 def test_extract_json_invalid():
     assert extract_json("抱歉，我无法操作。") is None
     assert extract_json("nothing here") is None

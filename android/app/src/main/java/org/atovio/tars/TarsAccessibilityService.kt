@@ -91,7 +91,11 @@ class TarsAccessibilityService : AccessibilityService() {
         for ((layer, nodes) in layerNodes) {
             for (n in nodes) {
                 val b = android.graphics.Rect().also { n.getBoundsInScreen(it) }
-                if (b.isEmpty) continue
+                // Keep zero-size interactive nodes in the ID stream. Some apps (notably
+                // Gmail's compose FAB shortcut) expose a clickable semantic node with
+                // bounds=[0,0][0,0]. The Python summarizer intentionally keeps these
+                // nodes too, so dropping them here would shift every subsequent ID.
+                val zeroSize = b.isEmpty
                 // Mirror agent.ui_summarizer._is_interactive: only interactive nodes
                 // participate in ID numbering, otherwise model IDs drift from execution IDs.
                 if (b.left < 0 || b.top < 0) continue
@@ -106,9 +110,9 @@ class TarsAccessibilityService : AccessibilityService() {
                 // Skip full-screen container nodes from occluding anything (transparent root).
                 if (b.width() >= resources.displayMetrics.widthPixels - 1 &&
                     b.height() >= resources.displayMetrics.heightPixels - 1) continue
-                if (layer > 0 && covered.any { it.contains(b) }) { culled++; continue }
+                if (!zeroSize && layer > 0 && covered.any { it.contains(b) }) { culled++; continue }
                 visible += n to layer
-                if (layer == 0) covered += b
+                if (layer == 0 && !zeroSize) covered += b
             }
         }
         Log.i(TAG_A11Y, String.format("collectVisible totalNodes=%d culled=%d visible=%d",
