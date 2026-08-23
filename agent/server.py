@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
 from typing import Callable
@@ -79,8 +80,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the TARS loopback Agent service")
     parser.add_argument("--mock", action="store_true", help="use a deterministic no-model backend for integration tests")
     parser.add_argument("--config", default="config/cloud.yaml", help="private cloud deployment YAML")
+    parser.add_argument(
+        "--log-file",
+        default="tars-agent.log",
+        help="write Agent logs to this UTF-8 file as well as stderr (default: tars-agent.log)",
+    )
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    log_format = "%(asctime)s %(levelname)s %(name)s %(message)s"
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    log_path = Path(args.log_file)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    handlers.append(logging.FileHandler(log_path, encoding="utf-8"))
+    logging.basicConfig(level=logging.INFO, format=log_format, handlers=handlers, force=True)
+    logger.info("Agent file logging enabled: %s", log_path)
     if args.mock:
         configure_runtime(mock=True)
     else:

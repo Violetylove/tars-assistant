@@ -31,3 +31,4 @@ android/app/build/
 # Runtime diagnostics
 .runtime/
 .tmp/
+*.log

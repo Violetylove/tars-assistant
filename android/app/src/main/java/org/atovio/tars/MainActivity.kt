@@ -95,7 +95,7 @@ class MainActivity : Activity() {
                             break
                         }
                         if (service == null || !service.awaitFreshUiAfter(
-                                uiXml, OBSERVATION_TIMEOUT_MS,
+                                uiXml, foreground, OBSERVATION_TIMEOUT_MS,
                                 observationVersion,
                             )) {
                             output += "未观察到界面更新，已停止任务"

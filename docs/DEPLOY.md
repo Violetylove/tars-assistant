@@ -48,6 +48,14 @@ cp config/cloud.yaml.example config/cloud.yaml
 python -m agent.server
 ```
 
+Agent 日志默认同时输出到终端和当前目录的 `tars-agent.log`。在 Termux 后台读取：
+
+```sh
+run-as com.termux cat files/home/tars-assistant/tars-agent.log
+```
+
+也可通过 `--log-file <path>` 指定日志文件路径。
+
 Agent 只监听设备 loopback。启动后 Android App 的请求经 Agent 转发到云端模型，模型输出仍必须通过
 Python schema 校验与 Android 动作白名单、敏感操作确认。
 

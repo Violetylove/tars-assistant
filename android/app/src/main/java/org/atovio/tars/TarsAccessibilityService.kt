@@ -92,6 +92,17 @@ class TarsAccessibilityService : AccessibilityService() {
             for (n in nodes) {
                 val b = android.graphics.Rect().also { n.getBoundsInScreen(it) }
                 if (b.isEmpty) continue
+                // Mirror agent.ui_summarizer._is_interactive: only interactive nodes
+                // participate in ID numbering, otherwise model IDs drift from execution IDs.
+                if (b.left < 0 || b.top < 0) continue
+                val className = n.className?.toString().orEmpty()
+                val importantClass = className.contains("Button", ignoreCase = true) ||
+                    className.contains("EditText", ignoreCase = true) ||
+                    className.contains("CheckBox", ignoreCase = true) ||
+                    className.contains("RadioButton", ignoreCase = true) ||
+                    className.contains("Switch", ignoreCase = true) ||
+                    className.contains("ImageButton", ignoreCase = true)
+                if (!(n.isClickable || n.isFocusable || (importantClass && n.isEnabled))) continue
                 // Skip full-screen container nodes from occluding anything (transparent root).
                 if (b.width() >= resources.displayMetrics.widthPixels - 1 &&
                     b.height() >= resources.displayMetrics.heightPixels - 1) continue
@@ -111,8 +122,9 @@ class TarsAccessibilityService : AccessibilityService() {
         for (i in 0 until node.childCount) node.getChild(i)?.let { collectAllNodes(it, out) }
     }
 
-    fun currentAppPackage(): String? = rootInActiveWindow?.packageName?.toString()
-        ?.takeIf { it.isNotBlank() } ?: foregroundPackage
+    /** The event stream updates before rootInActiveWindow during app transitions. */
+    fun currentAppPackage(): String? = foregroundPackage
+        ?: rootInActiveWindow?.packageName?.toString()?.takeIf { it.isNotBlank() }
 
     fun currentActivity(): String? = foregroundActivity
 
@@ -126,30 +138,30 @@ class TarsAccessibilityService : AccessibilityService() {
      */
     fun awaitFreshUiAfter(
         previousUiXml: String,
+        previousPackage: String?,
         timeoutMs: Long,
         previousObservationVersion: Long = observationVersion,
     ): Boolean {
-        val previousPackage = Regex("package=\"([^\"]*)\"").find(previousUiXml)?.groupValues?.get(1)
         val deadline = android.os.SystemClock.elapsedRealtime() + timeoutMs
-        var eventRefreshUsed = false
         Log.i(TAG_A11Y, String.format("awaitFresh prev_len=%d prev_pkg=%s prev_version=%d", previousUiXml.length, previousPackage, previousObservationVersion))
         while (android.os.SystemClock.elapsedRealtime() < deadline) {
             val currentUiXml = currentUiXml()
-            val curPkg = rootInActiveWindow?.packageName?.toString()?.takeIf { it.isNotBlank() }
+            val curPkg = currentAppPackage()
             val pkgChanged = curPkg != null && curPkg != previousPackage
             val xmlChanged = currentUiXml.isNotBlank() && currentUiXml != previousUiXml
             val eventChanged = observationVersion != previousObservationVersion
-            Log.i(TAG_A11Y, String.format("awaitFresh poll pkg=%s len=%d blank=%b pkgChanged=%b xmlChanged=%b eventChanged=%b", curPkg, currentUiXml.length, currentUiXml.isBlank(), pkgChanged, xmlChanged, eventChanged))
-            if (pkgChanged || xmlChanged) return true
-            if (eventChanged && !eventRefreshUsed) {
-                // Accessibility can report focus/content changes before the root tree is rebuilt.
-                // Allow one delayed resample, but keep this bounded to avoid stale-loop retries.
-                eventRefreshUsed = true
-                try { Thread.sleep(EVENT_REFRESH_DELAY_MS) } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    return false
-                }
-                return currentUiXml().isNotBlank()
+            val xmlMatchesForeground = curPkg != null && currentUiXml.contains("package=\"$curPkg\"")
+            val fresh = xmlMatchesForeground && (pkgChanged || xmlChanged)
+            Log.i(TAG_A11Y, String.format(
+                "awaitFresh poll pkg=%s len=%d blank=%b pkgChanged=%b xmlChanged=%b eventChanged=%b xmlMatchesForeground=%b fresh=%b",
+                curPkg, currentUiXml.length, currentUiXml.isBlank(), pkgChanged, xmlChanged,
+                eventChanged, xmlMatchesForeground, fresh,
+            ))
+            if (fresh) return true
+            if (eventChanged) {
+                // Events frequently arrive before getWindows/rootInActiveWindow catches up. They
+                // trigger another sample but never prove that its XML is fresh on their own.
+                Log.i(TAG_A11Y, "awaitFresh event observed; waiting for a stable foreground XML")
             }
             try {
                 Thread.sleep(OBSERVATION_POLL_MS)
@@ -180,7 +192,6 @@ class TarsAccessibilityService : AccessibilityService() {
         const val ACTION_CONNECTED = "org.atovio.tars.ACCESSIBILITY_CONNECTED"
         @Volatile var instance: TarsAccessibilityService? = null
         private const val OBSERVATION_POLL_MS = 100L
-        private const val EVENT_REFRESH_DELAY_MS = 120L
         private const val TAG_A11Y = "TarsA11y"
     }
 }
