@@ -115,25 +115,25 @@ def test_to_llm_prompt_compact():
     assert len(prompt.split()) <= 500
 
 
-def test_occlusion_annotation_for_off_screen_and_ime():
-    # 视口：屏幕 1080x2340，软键盘展开覆盖 y>=1400。
+def test_node_layer_and_window_facts_in_prompt():
+    # 每节点带层号 [层N]，且结构事实暴露 <window-info> 的图层与区域（供模型按 z 轴推断覆盖）。
     xml = (
-        '<hierarchy screen_w="1080" screen_h="2340" ime_visible="true" ime_top="1400">'
+        '<hierarchy screen_w="1080" screen_h="2340">'
+        '<window-info type="application" layer="0" bounds="[0,0][1080,2340]"/>'
+        '<window-info type="input_method" layer="1" bounds="[0,1593][1080,2340]"/>'
+        '<window-info type="system" layer="3" bounds="[0,0][1080,136]"/>'
         '<window layer="0">'
-        '<node text="写邮件" class="android.widget.Button" bounds="[816,158][948,290]" clickable="true"/>'
         '<node text="主题" class="android.widget.EditText" bounds="[100,2230][980,2300]" clickable="true"/>'
-        '<node text="正文" class="android.widget.EditText" bounds="[100,2270][980,2416]" clickable="true"/>'
         '</window>'
         '</hierarchy>'
     )
     nodes = summarize_xml(xml)
-    by_text = {n["text"]: n for n in nodes}
-    assert by_text["写邮件"]["occluded"] is None         # 顶部可见
-    assert by_text["主题"]["occluded"] == "键盘遮挡"       # 底部 2300 > ime_top 1400
-    assert by_text["正文"]["occluded"] == "出屏"           # 底部 2416 > 屏高 2340
+    assert nodes[0]["layer"] == 0
     prompt = to_llm_prompt(nodes)
-    assert "[不可见: 键盘遮挡]" in prompt
-    assert "[不可见: 出屏]" in prompt
+    assert "[层0]" in prompt
+    context = to_llm_context(xml)
+    assert "input_method@层1" in context  # 非应用窗口（键盘）的图层/区域作为事实暴露给模型
+    assert "[0,1593][1080,2340]" in context
 
 
 def test_decision_prompt_includes_optional_foreground_context():

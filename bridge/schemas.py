@@ -92,6 +92,7 @@ _COMMON_DEFS = {
             },
             "clickable": {"type": "boolean"},
             "focused": {"type": "boolean"},
+            "layer": {"type": "integer", "minimum": 0},
         },
         "required": ["id", "type", "clickable"],
         "additionalProperties": False,
