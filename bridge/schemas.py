@@ -93,6 +93,8 @@ _COMMON_DEFS = {
             "clickable": {"type": "boolean"},
             "focused": {"type": "boolean"},
             "layer": {"type": "integer", "minimum": 0},
+            "depth": {"type": "integer", "minimum": 0},
+            "container": {"type": "string"},
         },
         "required": ["id", "type", "clickable"],
         "additionalProperties": False,

@@ -66,52 +66,55 @@ class Summarizer:
         # 屏幕尺寸（窗口图层/区域事实见 to_llm_context 对 <window-info> 的解析）。
         screen_w = _int_attr(root, "screen_w")
         screen_h = _int_attr(root, "screen_h")
-        # (layer, node) 分组：解析 <window layer="N"> 层级
-        layered: list[tuple[int, ET.Element]] = []
-        current_layer = 0
-        for elem in root.iter():
-            if elem.tag == "window":
-                current_layer = int(elem.get("layer", "0"))
-                continue
-            if elem.tag != "node":
-                continue
-            bounds = _parse_bounds(elem.get("bounds", ""))
-            if not bounds:
-                continue
-            if not self._is_interactive(elem, bounds):
-                continue
-            layered.append((current_layer, elem))
+        # 递归行走：保留**树结构**（深度 + 父容器），id 用**树序**，让模型能想象出画面。
+        # (layer, depth, parent_label, elem)
+        layered: list[tuple[int, int, str, ET.Element]] = []
 
-        # 按 layer 从上到下（0 最顶）遮挡剔除
-        # 遮挡只在跨图层生效：同一 layer 内节点共享同一视觉平面（透明容器不遮挡
-        # 兄弟/子节点）；layer 0 的可见节点占据区域才覆盖下层（layer>0）。
+        def walk(elem: ET.Element, layer: int, depth: int, parent_label: str) -> None:
+            if elem.tag == "window":
+                for child in list(elem):
+                    walk(child, int(elem.get("layer", "0")), 0, "")
+                return
+            if elem.tag != "node":
+                return
+            bounds = _parse_bounds(elem.get("bounds", ""))
+            if bounds and self._is_interactive(elem, bounds):
+                layered.append((layer, depth, parent_label, elem))
+            # 子节点的父容器 = 当前节点的标签
+            child_label = _short_label(elem)
+            for child in list(elem):
+                walk(child, layer, depth + 1, child_label or parent_label)
+
+        for child in list(root):
+            walk(child, 0, 0, "")
+
+        # 跨层遮挡剔除（保留树序）。遮挡只在跨图层生效：同一 layer 内节点共享同一视觉平面。
         covered: list[tuple[int, int, int, int]] = []
-        kept: list[tuple[int, ET.Element, tuple[int, int, int, int]]] = []
-        for layer, elem in sorted(layered, key=lambda x: x[0]):
+        kept: list[tuple[int, int, str, ET.Element, tuple[int, int, int, int]]] = []
+        for layer, depth, parent_label, elem in sorted(layered, key=lambda x: x[0]):
             bounds = _parse_bounds(elem.get("bounds", ""))
             is_fullscreen = bounds[2] >= 1079 and bounds[3] >= 2339
             if layer > 0 and not is_fullscreen and self._is_fully_covered(bounds, covered):
                 continue  # 下层节点被上层完全覆盖 → 视觉不可见，剔除
-            kept.append((layer, elem, bounds))
+            kept.append((layer, depth, parent_label, elem, bounds))
             if layer == 0 and not is_fullscreen:
                 covered.append(bounds)  # 仅顶层非全屏节点占据区域覆盖下层
 
         nodes: List[dict] = []
-        for _layer, elem, _bounds in kept:
-            text = self._semantic_text(elem)
+        for _layer, depth, parent_label, elem, _bounds in kept:
             nodes.append({
-                "id": len(nodes),  # 摘要内唯一序号
+                "id": len(nodes),  # 树序唯一序号（执行侧 findNode 同序）
                 "type": self._classify(elem),
-                "text": text,
+                "text": self._semantic_text(elem),
                 "bounds": list(_bounds),
                 "clickable": _is_true(elem.get("clickable")),
                 "focused": _is_true(elem.get("focused")),
-                "layer": _layer,  # 节点所在窗口图层（z 轴），模型自行推断遮挡关系
+                "layer": _layer,
+                "depth": depth,           # 树深度：用于提示词缩进
+                "container": parent_label,  # 父容器标签：让模型看到节点归属
             })
 
-        # 排序：先上→下，再左→右（bounds 为 [x1,y1,x2,y2]）
-        nodes.sort(key=lambda n: (n["bounds"][1], n["bounds"][0]))
-        # 数量截断
+        # 树序截断（不再按 (y,x) 重排，保持与执行侧一致）
         nodes = nodes[: self.max_nodes]
         # 重赋稳定 id
         for i, n in enumerate(nodes):
@@ -188,6 +191,12 @@ def _is_true(v) -> bool:
     return str(v).strip().lower() == "true"
 
 
+def _short_label(elem) -> str:
+    """节点的短标签（text/content-desc，截断），用于提示父容器名。"""
+    v = (elem.get("text") or elem.get("content-desc") or "").replace("\n", " ").strip()
+    return v[:16] if v else ""
+
+
 def _int_attr(elem, name: str) -> int:
     """读取元素属性为 int；缺失/非法返回 0。"""
     raw = (elem.get(name) or "").strip()
@@ -213,7 +222,13 @@ def to_llm_line(node: dict) -> str:
         typ = f"{typ}(focused)"
     label = node.get("text") or ""
     layer = node.get("layer", 0)
-    return f"[{node['id']}] {typ}\"{label}\" ({cx},{cy}) [层{layer}]"
+    depth = int(node.get("depth", 0))
+    container = (node.get("container") or "").strip()
+    ind = "  " * depth  # 树缩进：父→子分组
+    line = f"{ind}[{node['id']}] {typ}\"{label}\" ({cx},{cy}) [层{layer}]"
+    if container:
+        line += f" <{container}>"
+    return line
 
 
 def to_llm_prompt(nodes: List[dict]) -> str:
