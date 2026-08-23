@@ -90,8 +90,18 @@ class MainActivity : Activity() {
                             ?: ActionExecutor.ExecutionSummary(listOf("无障碍服务未连接"), completed = false)
                         output += execution.messages
                         if (!execution.completed) {
-                            reachedRoundLimit = false
-                            break
+                            // An action that failed to execute (stale/disabled target, node vanished)
+                            // is also "no response": re-collect and let the model re-decide on
+                            // the current tree instead of silently aborting, bounded by the cap.
+                            consecutiveNoChange++
+                            noteForNextRound = NO_CHANGE_NOTE
+                            output += "动作未生效，正在重新采集当前界面（连续无变化第 " + consecutiveNoChange + " 次）"
+                            if (consecutiveNoChange >= MAX_NO_CHANGE_ROUNDS) {
+                                output += "; 连续多次无变化，已停止任务"
+                                reachedRoundLimit = false
+                                break
+                            }
+                            continue
                         }
                         history.put(JSONObject().put("actions", response.actions.toJsonArray()))
                         if (response.done || !response.needObservation || response.actions.isEmpty()) {
