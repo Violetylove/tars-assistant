@@ -32,3 +32,6 @@ android/app/build/
 .runtime/
 .tmp/
 *.log
+
+# Local Android debug keystore dir (test artifact)
+.android-local/

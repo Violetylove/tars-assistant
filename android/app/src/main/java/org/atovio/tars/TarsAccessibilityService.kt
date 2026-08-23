@@ -17,8 +17,15 @@ class TarsAccessibilityService : AccessibilityService() {
     }
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         // Preserve the latest foreground context for the next Agent request; UI remains pulled on demand.
-        event?.packageName?.toString()?.takeIf { it.isNotBlank() }?.let { foregroundPackage = it }
-        event?.className?.toString()?.takeIf { it.isNotBlank() }?.let { foregroundActivity = it }
+        // Ignore input-method events: the soft keyboard emits its own window events and would
+        // otherwise overwrite the real foreground app, breaking the "XML matches foreground" check.
+        if (event != null) {
+            val isImeEvent = try {
+                windows?.firstOrNull { it.id == event.windowId }?.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD
+            } catch (_: Throwable) { false }
+            event.packageName?.toString()?.takeIf { it.isNotBlank() && !isImeEvent }?.let { foregroundPackage = it }
+            event.className?.toString()?.takeIf { it.isNotBlank() }?.let { foregroundActivity = it }
+        }
         if (event != null) {
             when (event.eventType) {
                 AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
@@ -126,9 +133,19 @@ class TarsAccessibilityService : AccessibilityService() {
         for (i in 0 until node.childCount) node.getChild(i)?.let { collectAllNodes(it, out) }
     }
 
-    /** The event stream updates before rootInActiveWindow during app transitions. */
-    fun currentAppPackage(): String? = foregroundPackage
-        ?: rootInActiveWindow?.packageName?.toString()?.takeIf { it.isNotBlank() }
+    /** The event stream updates before rootInActiveWindow during app transitions.
+     *
+     * Resolve the foreground app from the focused application window first so the
+     * soft keyboard (an input-method window) is never reported as the foreground app.
+     */
+    fun currentAppPackage(): String? {
+        val focusedApp = try {
+            windows?.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.isFocused }
+                ?.root?.packageName?.toString()?.takeIf { it.isNotBlank() }
+        } catch (_: Throwable) { null }
+        return focusedApp ?: foregroundPackage
+            ?: rootInActiveWindow?.packageName?.toString()?.takeIf { it.isNotBlank() }
+    }
 
     fun currentActivity(): String? = foregroundActivity
 
@@ -148,6 +165,11 @@ class TarsAccessibilityService : AccessibilityService() {
     ): Boolean {
         val deadline = android.os.SystemClock.elapsedRealtime() + timeoutMs
         Log.i(TAG_A11Y, String.format("awaitFresh prev_len=%d prev_pkg=%s prev_version=%d", previousUiXml.length, previousPackage, previousObservationVersion))
+        // A single fresh signal can be a mid-transition snapshot: the previous app is still
+        // serialised while the next app animates in, so the next round would observe a stale
+        // tree and re-act on the old screen (e.g. clicking the launcher icon a second time).
+        // Require the SAME fresh XML twice in a row so the next round observes a settled window.
+        var stableCandidate: String? = null
         while (android.os.SystemClock.elapsedRealtime() < deadline) {
             val currentUiXml = currentUiXml()
             val curPkg = currentAppPackage()
@@ -156,12 +178,14 @@ class TarsAccessibilityService : AccessibilityService() {
             val eventChanged = observationVersion != previousObservationVersion
             val xmlMatchesForeground = curPkg != null && currentUiXml.contains("package=\"$curPkg\"")
             val fresh = xmlMatchesForeground && (pkgChanged || xmlChanged)
+            val stable = fresh && stableCandidate == currentUiXml
             Log.i(TAG_A11Y, String.format(
-                "awaitFresh poll pkg=%s len=%d blank=%b pkgChanged=%b xmlChanged=%b eventChanged=%b xmlMatchesForeground=%b fresh=%b",
+                "awaitFresh poll pkg=%s len=%d blank=%b pkgChanged=%b xmlChanged=%b eventChanged=%b xmlMatchesForeground=%b fresh=%b stable=%b",
                 curPkg, currentUiXml.length, currentUiXml.isBlank(), pkgChanged, xmlChanged,
-                eventChanged, xmlMatchesForeground, fresh,
+                eventChanged, xmlMatchesForeground, fresh, stable,
             ))
-            if (fresh) return true
+            if (stable) return true
+            stableCandidate = if (fresh) currentUiXml else null
             if (eventChanged) {
                 // Events frequently arrive before getWindows/rootInActiveWindow catches up. They
                 // trigger another sample but never prove that its XML is fresh on their own.
