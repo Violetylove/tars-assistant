@@ -68,6 +68,8 @@ class MainActivity : Activity() {
                     val sessionId = java.util.UUID.randomUUID().toString()
                     val output = mutableListOf<String>()
                     var reachedRoundLimit = true
+                    var consecutiveNoChange = 0
+                    var noteForNextRound = ""
                     for (round in 0 until MAX_OBSERVATION_ROUNDS) {
                         val uiXml = service?.currentUiXml().orEmpty()
                         val observationVersion = service?.currentObservationVersion() ?: 0L
@@ -80,7 +82,9 @@ class MainActivity : Activity() {
                             uiXml = uiXml,
                             sessionId = sessionId,
                             history = history,
+                            observationNote = noteForNextRound.takeIf { it.isNotBlank() },
                         ))
+                        noteForNextRound = ""
                         if (response.reply.isNotBlank()) output += response.reply
                         val execution = service?.execute(response.actions, ::confirmAction)
                             ?: ActionExecutor.ExecutionSummary(listOf("无障碍服务未连接"), completed = false)
@@ -98,11 +102,23 @@ class MainActivity : Activity() {
                                 uiXml, foreground, OBSERVATION_TIMEOUT_MS,
                                 observationVersion,
                             )) {
-                            output += "未观察到界面更新，已停止任务"
-                            reachedRoundLimit = false
-                            break
+                            // A no-op action (e.g. a target pushed off-screen by an overlay
+                            // and re-created under a non-tree window) must not silently end the
+                            // task. Re-collect the current (now stable) UI and ask the model to
+                            // re-decide, with a bounded retry so a genuinely stuck loop still
+                            // fail-closes.
+                            consecutiveNoChange++
+                            noteForNextRound = NO_CHANGE_NOTE
+                            output += "未观察到界面更新，正在重新采集当前界面（连续无变化第 " + consecutiveNoChange + " 次）"
+                            if (consecutiveNoChange >= MAX_NO_CHANGE_ROUNDS) {
+                                output += "; 连续多次无变化，已停止任务"
+                                reachedRoundLimit = false
+                                break
+                            }
+                            continue
                         }
-                        output += "界面已更新，进入下一轮（前台：${service.currentAppPackage() ?: UNKNOWN_FOREGROUND}）"
+                        consecutiveNoChange = 0
+                        output += "界面已更新，进入下一轮（前台：" + (service.currentAppPackage() ?: UNKNOWN_FOREGROUND) + "）"
                     }
                     if (reachedRoundLimit) output += "已达到最大观察轮数，已停止任务"
                     runOnUiThread {
@@ -242,8 +258,10 @@ class MainActivity : Activity() {
 
     companion object {
         private const val MAX_OBSERVATION_ROUNDS = 12
+        private const val MAX_NO_CHANGE_ROUNDS = 2
         private const val OBSERVATION_TIMEOUT_MS = 2_000L
         private const val UNKNOWN_FOREGROUND = "未知"
+        private const val NO_CHANGE_NOTE = "上一轮动作未使界面发生变化（目标可能被遮挡、已出视口或不可达）。当前界面见本次新采集；请重新观察，选择其他能推进目标的动作。"
         private const val FIFTEEN_MINUTES_MS = 15 * 60 * 1000L
         private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 1002
         private const val MICROPHONE_PERMISSION_REQUEST_CODE = 1003

@@ -144,6 +144,7 @@ SCHEMAS = {
             "app": {"type": "string"},
             "activity": {"type": "string"},
             "ui_xml": {"type": "string"},
+            "observation_note": {"type": "string", "maxLength": 500},
             "history": {
                 "type": "array",
                 "items": _ref("history_entry"),

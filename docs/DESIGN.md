@@ -62,11 +62,12 @@ Agent 无状态；`session_id` 由 App 生成并在每轮回传。
   "app": "com.android.settings",
   "activity": "...",
   "ui_xml": "<node ... />",
+  "observation_note": "上一轮动作未使界面发生变化…",
   "history": []
 }
 ```
 
-`protocol_version`、`session_id`、`intent` 必填；`app`、`activity`、`ui_xml`、`history` 可选。`ui_xml` 缺失按空节点处理，非法非空 XML 拒绝。`history` 最多 7 轮，每轮最多 8 个合法动作。
+`protocol_version`、`session_id`、`intent` 必填；`app`、`activity`、`ui_xml`、`observation_note`、`history` 可选。`ui_xml` 缺失按空节点处理，非法非空 XML 拒绝。`observation_note` 是执行侧在「上一轮动作未产生界面变化」后重采界面时捎带的反馈（最多 500 字），Agent 会将其注入模型提示词，提示模型不要重复一个对未变化界面无效的动作；`history` 最多 7 轮，每轮最多 8 个合法动作。
 
 ### 3.2 `agent_response`
 

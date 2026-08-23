@@ -143,9 +143,9 @@ def agent_run(req: dict) -> dict:
     # === DIAG (temporary): expose request content to diagnose occluder handling ===
     diag_xml = req.get("ui_xml") or ""
     logger.info(
-        "DIAG req session=%s intent=%r app=%r activity=%r ui_bytes=%d has_suggestion=%s has_subject=%s has_body=%s has_recipient=%s",
+        "DIAG req session=%s intent=%r app=%r activity=%r ui_bytes=%d obs_note=%r has_suggestion=%s has_subject=%s has_body=%s has_recipient=%s",
         req["session_id"], req.get("intent"), req.get("app"), req.get("activity"),
-        len(diag_xml),
+        len(diag_xml), req.get("observation_note") or "",
         ("Winter Yuan" in diag_xml) or ("建议" in diag_xml) or ("Suggestion" in diag_xml),
         ("主题" in diag_xml), ("正文" in diag_xml) or ("撰写" in diag_xml),
         ("violetylove" in diag_xml),
@@ -200,6 +200,7 @@ def agent_run(req: dict) -> dict:
             history=req.get("history"),
             app=req.get("app"),
             activity=req.get("activity"),
+            observation_note=req.get("observation_note", ""),
         )
         response = _validate_response_for_request(resp, req["session_id"])
         logger.info("agent response session=%s source=llm actions=%s done=%s observe=%s",

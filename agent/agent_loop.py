@@ -78,8 +78,14 @@ def _build_user_message(
     app: Optional[str] = None,
     activity: Optional[str] = None,
     ui_context: str = "",
+    observation_note: str = "",
 ) -> str:
-    segs = [f"用户意图：{intent}", "当前屏幕节点：", to_llm_prompt(nodes)]
+    segs = [f"用户意图：{intent}"]
+    if observation_note:
+        # The execution side re-observed after an action produced no UI change. Tell the
+        # model explicitly so it does not repeat a no-op decision on an unchanged tree.
+        segs.append(f"注意（上一轮反馈）：{observation_note}")
+    segs.extend(["当前屏幕节点：", to_llm_prompt(nodes)])
     if ui_context:
         segs.extend(["当前屏幕结构事实：", ui_context])
     if app:
@@ -161,6 +167,7 @@ def decide_once(
     history: Optional[list[dict]] = None,
     app: Optional[str] = None,
     activity: Optional[str] = None,
+    observation_note: str = "",
     max_retries: int = 1,
 ) -> dict:
     """单轮决策：摘要 + 调 LLM + 净化 + schema 校验。返回合法 agent_response。
@@ -171,7 +178,7 @@ def decide_once(
     nodes = summarize_xml(ui_xml)
     user_msg = _build_user_message(
         intent, nodes, history or [], app=app, activity=activity,
-        ui_context=to_llm_context(ui_xml),
+        ui_context=to_llm_context(ui_xml), observation_note=observation_note,
     )
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},

@@ -66,6 +66,18 @@ def test_task_request_rejects_oversized_history():
     assert validate(req, "task_request")
 
 
+def test_task_request_accepts_observation_note():
+    req = _load("task_request.json")
+    req["observation_note"] = "上一轮动作未使界面发生变化"
+    assert validate(req, "task_request") == []
+
+
+def test_task_request_rejects_oversized_observation_note():
+    req = _load("task_request.json")
+    req["observation_note"] = "x" * 501
+    assert validate(req, "task_request")
+
+
 # --- agent_response / action ---
 
 def test_agent_response_example_pass():

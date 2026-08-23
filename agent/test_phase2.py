@@ -124,6 +124,15 @@ def test_decision_prompt_includes_optional_foreground_context():
     assert "当前前台窗口类名：com.android.settings.Settings" in message
 
 
+def test_decision_prompt_includes_observation_note():
+    message = _build_user_message(
+        "打开设置", summarize_xml(SIMPLE_XML), [],
+        observation_note="上一轮动作未使界面发生变化（目标可能被遮挡）",
+    )
+    assert "注意（上一轮反馈）：上一轮动作未使界面发生变化" in message
+    assert message.index("注意（上一轮反馈）") < message.index("当前屏幕节点")
+
+
 def test_structural_context_preserves_raw_window_and_node_facts():
     xml = (
         '<hierarchy><window layer="0"><node package="com.google.android.gm" '
