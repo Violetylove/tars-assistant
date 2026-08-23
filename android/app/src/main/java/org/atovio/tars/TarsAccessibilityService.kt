@@ -1,13 +1,16 @@
 package org.atovio.tars
 
 import android.accessibilityservice.AccessibilityService
+import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 
 class TarsAccessibilityService : AccessibilityService() {
     private var floatingVoiceOverlay: FloatingVoiceOverlay? = null
     @Volatile private var foregroundPackage: String? = null
     @Volatile private var foregroundActivity: String? = null
+    @Volatile private var observationVersion: Long = 0L
     override fun onServiceConnected() {
         instance = this
         sendBroadcast(android.content.Intent(ACTION_CONNECTED).setPackage(packageName))
@@ -16,6 +19,15 @@ class TarsAccessibilityService : AccessibilityService() {
         // Preserve the latest foreground context for the next Agent request; UI remains pulled on demand.
         event?.packageName?.toString()?.takeIf { it.isNotBlank() }?.let { foregroundPackage = it }
         event?.className?.toString()?.takeIf { it.isNotBlank() }?.let { foregroundActivity = it }
+        if (event != null) {
+            when (event.eventType) {
+                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+                AccessibilityEvent.TYPE_VIEW_FOCUSED,
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
+                AccessibilityEvent.TYPE_VIEW_SELECTED -> observationVersion++
+            }
+        }
     }
     override fun onInterrupt() = Unit
 
@@ -26,19 +38,119 @@ class TarsAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    fun currentUiXml(): String = rootInActiveWindow?.let { UiTreeXml.serialize(it) } ?: ""
+    fun currentUiXml(): String {
+        val roots = collectVisibleWindowRoots()
+        if (roots.isEmpty()) return ""
+        return UiTreeXml.serializeWindows(roots)
+    }
+
+    /**
+     * Collect root nodes of the visible application windows, in z-order (top first),
+     * excluding irrelevant system/input/overlay windows.
+     *
+     * This is the multi-layer counterpart of `rootInActiveWindow` so that transient
+     * overlay windows (e.g. Gmail's peoplekit suggestion card) are also captured.
+     * Only TYPE_APPLICATION / TYPE_ACCESSIBILITY_OVERLAY (ours is filtered below) /
+     * app-owned overlay windows are considered; system and input-method windows are skipped.
+     */
+    fun collectVisibleWindowRoots(): List<AccessibilityNodeInfo> {
+        val roots = mutableListOf<AccessibilityNodeInfo>()
+        val windows = try { windows } catch (_: Throwable) { emptyList<AccessibilityWindowInfo>() }
+        // windows is already ordered by z-order (top-most first) on API 21+.
+        for (w in windows) {
+            if (w.type != AccessibilityWindowInfo.TYPE_APPLICATION) continue
+            w.root?.let { roots += it }
+        }
+        // Fallback: some windows (esp. full-screen transparent app windows) can report a
+        // null root via getWindows(); make sure we never hand an empty tree downstream.
+        if (roots.isEmpty()) {
+            rootInActiveWindow?.let { roots += it }
+        }
+        return roots
+    }
+
+    /** Nodes that are visually reachable: not fully covered by an upper-layer node. */
+    fun collectVisibleNodes(): List<Pair<AccessibilityNodeInfo, Int>> {
+        val covered = mutableListOf<android.graphics.Rect>()
+        val visible = mutableListOf<Pair<AccessibilityNodeInfo, Int>>() // (node, layerIndex)
+        val roots = collectVisibleWindowRoots()
+        val allWindows = try { windows } catch (_: Throwable) { emptyList<AccessibilityWindowInfo>() }
+        Log.i(TAG_A11Y, String.format("collectVisible roots=%d totalWindows=%d types=%s",
+            roots.size, allWindows.size, allWindows.map { it.type }.toString()))
+        var totalNodes = 0
+        var culled = 0
+        // Occlusion only applies across layers: nodes of the same layer share one visual
+        // plane (transparent containers must not occlude their siblings/children).
+        val layerNodes = roots.withIndex().map { (layer, root) ->
+            val nodes = mutableListOf<AccessibilityNodeInfo>()
+            collectAllNodes(root, nodes)
+            totalNodes += nodes.size
+            layer to nodes
+        }
+        // Process layers top-down; only layer 0 may occlude lower layers.
+        for ((layer, nodes) in layerNodes) {
+            for (n in nodes) {
+                val b = android.graphics.Rect().also { n.getBoundsInScreen(it) }
+                if (b.isEmpty) continue
+                // Skip full-screen container nodes from occluding anything (transparent root).
+                if (b.width() >= resources.displayMetrics.widthPixels - 1 &&
+                    b.height() >= resources.displayMetrics.heightPixels - 1) continue
+                if (layer > 0 && covered.any { it.contains(b) }) { culled++; continue }
+                visible += n to layer
+                if (layer == 0) covered += b
+            }
+        }
+        Log.i(TAG_A11Y, String.format("collectVisible totalNodes=%d culled=%d visible=%d",
+            totalNodes, culled, visible.size))
+        return visible
+    }
+
+    private fun collectAllNodes(node: AccessibilityNodeInfo?, out: MutableList<AccessibilityNodeInfo>) {
+        if (node == null) return
+        out += node
+        for (i in 0 until node.childCount) node.getChild(i)?.let { collectAllNodes(it, out) }
+    }
 
     fun currentAppPackage(): String? = rootInActiveWindow?.packageName?.toString()
         ?.takeIf { it.isNotBlank() } ?: foregroundPackage
 
     fun currentActivity(): String? = foregroundActivity
 
-    /** Poll the root window until it differs from the pre-action UI snapshot. */
-    fun awaitFreshUiAfter(previousUiXml: String, timeoutMs: Long): Boolean {
+    fun currentObservationVersion(): Long = observationVersion
+
+    /** Poll the root window until it differs from the pre-action UI snapshot.
+     *
+     * Primary signal: the foreground package changed (handles cross-app window
+     * switches where rootInActiveWindow's node tree lags behind). Fallback: the
+     * serialised XML differs. Timeout stays fail-closed.
+     */
+    fun awaitFreshUiAfter(
+        previousUiXml: String,
+        timeoutMs: Long,
+        previousObservationVersion: Long = observationVersion,
+    ): Boolean {
+        val previousPackage = Regex("package=\"([^\"]*)\"").find(previousUiXml)?.groupValues?.get(1)
         val deadline = android.os.SystemClock.elapsedRealtime() + timeoutMs
+        var eventRefreshUsed = false
+        Log.i(TAG_A11Y, String.format("awaitFresh prev_len=%d prev_pkg=%s prev_version=%d", previousUiXml.length, previousPackage, previousObservationVersion))
         while (android.os.SystemClock.elapsedRealtime() < deadline) {
             val currentUiXml = currentUiXml()
-            if (currentUiXml.isNotBlank() && currentUiXml != previousUiXml) return true
+            val curPkg = rootInActiveWindow?.packageName?.toString()?.takeIf { it.isNotBlank() }
+            val pkgChanged = curPkg != null && curPkg != previousPackage
+            val xmlChanged = currentUiXml.isNotBlank() && currentUiXml != previousUiXml
+            val eventChanged = observationVersion != previousObservationVersion
+            Log.i(TAG_A11Y, String.format("awaitFresh poll pkg=%s len=%d blank=%b pkgChanged=%b xmlChanged=%b eventChanged=%b", curPkg, currentUiXml.length, currentUiXml.isBlank(), pkgChanged, xmlChanged, eventChanged))
+            if (pkgChanged || xmlChanged) return true
+            if (eventChanged && !eventRefreshUsed) {
+                // Accessibility can report focus/content changes before the root tree is rebuilt.
+                // Allow one delayed resample, but keep this bounded to avoid stale-loop retries.
+                eventRefreshUsed = true
+                try { Thread.sleep(EVENT_REFRESH_DELAY_MS) } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return false
+                }
+                return currentUiXml().isNotBlank()
+            }
             try {
                 Thread.sleep(OBSERVATION_POLL_MS)
             } catch (_: InterruptedException) {
@@ -68,6 +180,8 @@ class TarsAccessibilityService : AccessibilityService() {
         const val ACTION_CONNECTED = "org.atovio.tars.ACCESSIBILITY_CONNECTED"
         @Volatile var instance: TarsAccessibilityService? = null
         private const val OBSERVATION_POLL_MS = 100L
+        private const val EVENT_REFRESH_DELAY_MS = 120L
+        private const val TAG_A11Y = "TarsA11y"
     }
 }
 
@@ -75,6 +189,21 @@ private object UiTreeXml {
     fun serialize(root: AccessibilityNodeInfo): String = buildString {
         append("<?xml version=\"1.0\" encoding=\"utf-8\"?><hierarchy>")
         appendNode(root)
+        append("</hierarchy>")
+    }
+
+    /** Serialize multiple window roots (z-order, top first) into one hierarchy.
+     *
+     * Each window is wrapped in a <window layer="N"> group so that downstream
+     * summarizer/parser can see which nodes belong to which layer.
+     */
+    fun serializeWindows(roots: List<AccessibilityNodeInfo>): String = buildString {
+        append("<?xml version=\"1.0\" encoding=\"utf-8\"?><hierarchy>")
+        for ((layer, root) in roots.withIndex()) {
+            append("<window layer=\"$layer\">")
+            appendNode(root)
+            append("</window>")
+        }
         append("</hierarchy>")
     }
 

@@ -29,6 +29,20 @@ SIMPLE_XML = """<?xml version="1.0" encoding="utf-8"?>
 </hierarchy>
 """
 
+COMPOSITE_CONTROL_XML = """<?xml version="1.0" encoding="utf-8"?>
+<hierarchy>
+  <node text="" content-desc="" class="android.view.ViewGroup"
+        bounds="[20,100][800,240]" clickable="true">
+    <node text="Project Atlas" content-desc="" class="android.widget.TextView"
+          bounds="[40,120][500,170]" clickable="false"/>
+    <node text="" content-desc="Synchronized" class="android.widget.TextView"
+          bounds="[40,180][500,220]" clickable="false"/>
+  </node>
+  <node text="Continue" content-desc="" class="android.widget.Button"
+        bounds="[20,300][400,380]" clickable="true"/>
+</hierarchy>
+"""
+
 
 def _fresh_server():
     import importlib
@@ -55,9 +69,42 @@ def test_summarize_button_fields():
     assert btn["bounds"] == [240, 900, 600, 990]
 
 
+def test_summarize_preserves_descendant_labels_for_composite_control():
+    nodes = summarize_xml(COMPOSITE_CONTROL_XML)
+    # 只保留原有两个可操作节点；后代文本仅增强父节点语义，不生成新动作 ID。
+    assert [(node["id"], node["bounds"]) for node in nodes] == [
+        (0, [20, 100, 800, 240]),
+        (1, [20, 300, 400, 380]),
+    ]
+    assert nodes[0]["text"] == "Project Atlas / Synchronized"
+    assert nodes[1]["text"] == "Continue"
+
+
 def test_summarize_accepts_missing_ui_tree_as_empty_nodes():
     assert summarize_xml("") == []
     assert summarize_xml("   ") == []
+
+
+def test_summarize_occludes_lower_layer_fully_covered_nodes():
+    # 顶层 window layer=0：按钮 A 占据 [0,0][500,500]；底层 window layer=1：
+    # 按钮 B 位于 [100,100][300,300]（被 A 完全覆盖，应剔除），按钮 C 位于
+    # [600,100][900,300]（未被覆盖，应保留）。
+    xml = (
+        '<hierarchy>'
+        '<window layer="0">'
+        '<node text="A" class="android.widget.Button" bounds="[0,0][500,500]" clickable="true"/>'
+        '</window>'
+        '<window layer="1">'
+        '<node text="B" class="android.widget.Button" bounds="[100,100][300,300]" clickable="true"/>'
+        '<node text="C" class="android.widget.Button" bounds="[600,100][900,300]" clickable="true"/>'
+        '</window>'
+        '</hierarchy>'
+    )
+    nodes = summarize_xml(xml)
+    labels = [n["text"] for n in nodes]
+    assert "A" in labels
+    assert "B" not in labels  # 被上层 A 完全覆盖，视觉不可见
+    assert "C" in labels
 
 
 def test_to_llm_prompt_compact():

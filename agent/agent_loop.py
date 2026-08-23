@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -21,20 +22,50 @@ from bridge.validate import validate, validate_action
 from agent.llm_client import MockLLM, extract_json
 from agent.ui_summarizer import summarize_xml, to_llm_prompt
 
+logger = logging.getLogger("tars.agent_loop")
+
 SYSTEM_PROMPT = (
     "你是一个手机界面操作助手。用户给出目标意图，你逐步操作手机完成它。\n"
     "每一步决策时：\n"
-    "- 对照目标：判断当前屏幕哪些节点有助于完成目标，哪些是无关干扰物"
-    "（如提示卡、气泡、联想、建议、弹窗、权限框等临时组件）。\n"
+    "- 先思考：写下你看到的界面（哪些节点与目标相关、哪些是可能遮挡/干扰目标区域的临时组件，"
+    "如建议卡、提示、弹窗等），判断当前进展，然后说明你下一步准备做什么。\n"
     "- 动作前进性：优先选择能让你接近目标的操作。若一步后界面没有变化，或目标区域被干扰物"
     "挡住，先做低风险的消除动作（点空白处、或点安全的关闭按钮），让遮挡消失后再继续。\n"
-    "只能从下列动作中选择：click(需 target_node_id), type(需 target_node_id+text), "
-    "swipe(x1/y1/x2/y2/duration_ms), back, home, wait(ms), reply(给用户的话), done。\n"
-    "输出严格 JSON 对象，不要任何多余说明。当某一步做不了时应输出 "
-    '{"type":"reply","text":"..."}；当任务完成输出 {"type":"done"}。\n'
+    "- 最后单独输出一行、一个 JSON 对象作为你的指令，从以下动作中选择：\n"
+    "  click(需 target_node_id), type(需 target_node_id+text), swipe(x1/y1/x2/y2/duration_ms), "
+    "back, home, wait(ms), reply(给用户的话), done。\n"
+    "  思考文字务必在前面，JSON 指令放在回复的最后一行。当某一步做不了时指令为 "
+    '{"type":"reply","text":"..."}；任务完成时指令为 {"type":"done"}。\n'
     "节点行格式：[id] 类型\"文本\" (cx,cy)。click 和 type 的 target_node_id 必须是该节点的"
     " JSON 整数（例如 1，绝不能写成字符串 \"1\"）。"
 )
+
+
+def extract_last_json(text: str):
+    """从模型回复中提取最后一个 JSON 对象（指令在思考之后）。
+
+    DIAG: 与 llm_client.extract_json 找第一个 JSON 不同，这里取最后一个 ——
+    模型回复开头是自然语言思考，指令 JSON 位于末尾。思考文字中可能出现孤立
+    的 {}，取最后能稳定命中指令。
+    """
+    if not text or not text.strip():
+        return None
+    decoder = json.JSONDecoder()
+    last = None
+    i = 0
+    while i < len(text):
+        if text[i] == "{":
+            try:
+                obj, end = decoder.raw_decode(text[i:])
+                if isinstance(obj, dict):
+                    last = obj
+                i += end
+                continue
+            except json.JSONDecodeError:
+                pass
+        i += 1
+    return last
+
 
 # Confirmation is derived from UI content, never trusted to the model's flag alone.
 _SENSITIVE_LABELS = ("发送", "删除", "清除", "支付", "付款", "转账", "send", "delete", "pay")
@@ -143,7 +174,14 @@ def decide_once(
 
     for attempt in range(max_retries + 1):
         raw = llm.complete(messages, temperature=0)
-        obj = extract_json(raw)
+        # === DIAG (temporary): log the raw model reply (thinking + instruction) ===
+        logger.info(
+            "DIAG llm_reply session=%s repr=%r",
+            session_id, raw[:2000],
+        )
+        # === END DIAG ===
+        # Instruction sits after the thinking block; take the last JSON object.
+        obj = extract_last_json(raw)
 
         if not isinstance(obj, dict):
             if attempt < max_retries:

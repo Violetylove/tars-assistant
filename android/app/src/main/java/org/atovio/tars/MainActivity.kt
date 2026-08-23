@@ -70,6 +70,7 @@ class MainActivity : Activity() {
                     var reachedRoundLimit = true
                     for (round in 0 until MAX_OBSERVATION_ROUNDS) {
                         val uiXml = service?.currentUiXml().orEmpty()
+                        val observationVersion = service?.currentObservationVersion() ?: 0L
                         val foreground = service?.currentAppPackage() ?: UNKNOWN_FOREGROUND
                         output += "第 ${round + 1} 轮前台：$foreground"
                         val response = client.run(TaskRequest(
@@ -95,6 +96,7 @@ class MainActivity : Activity() {
                         }
                         if (service == null || !service.awaitFreshUiAfter(
                                 uiXml, OBSERVATION_TIMEOUT_MS,
+                                observationVersion,
                             )) {
                             output += "未观察到界面更新，已停止任务"
                             reachedRoundLimit = false

@@ -98,15 +98,17 @@ class ActionExecutor(
 
     private fun findNode(id: Int?): AccessibilityNodeInfo? {
         if (id == null) return null
-        val nodes = mutableListOf<AccessibilityNodeInfo>()
-        collect(service.rootInActiveWindow, nodes)
-        nodes.sortWith(compareBy<AccessibilityNodeInfo> {
+        // Multi-layer: use the same visible-window collection as the summarizer so IDs match.
+        val visible = TarsAccessibilityService.instance?.collectVisibleNodes()
+            ?.map { it.first }.orEmpty()
+        // Sort by screen position to mirror agent.ui_summarizer ordering (top->left).
+        val sorted = visible.sortedWith(compareBy<AccessibilityNodeInfo> {
             Rect().also { rect -> it.getBoundsInScreen(rect) }.top
         }.thenBy {
             Rect().also { rect -> it.getBoundsInScreen(rect) }.left
         })
         // Must mirror agent.ui_summarizer.MAX_NODES, because IDs are post-truncation summary IDs.
-        return nodes.take(60).getOrNull(id)
+        return sorted.take(60).getOrNull(id)
     }
 
     /** Resolve a type target to an actual editable node.
