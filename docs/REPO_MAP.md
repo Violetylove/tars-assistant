@@ -26,7 +26,7 @@ MainActivity / 触发器
 | `agent/` | Termux FastAPI 服务、UI 摘要、模型决策 | `server.main`、`server.agent_run`、`agent_loop.decide_once` |
 | `bridge/` | 请求、响应、动作的 JSON Schema 及校验 | `schemas.SCHEMAS`、`validate.validate` |
 | `config/` | 云端模型私有配置模板 | `cloud.yaml.example`；真实 `cloud.yaml` 不入库 |
-| `scripts/` | 本机协议烟测 | `smoke_agent.py` |
+| `scripts/` | 本机协议烟测与一键部署 | `smoke_agent.py`、`deploy_agent.sh` |
 | `examples/` | 协议示例 JSON | `task_request.json`、`agent_response.json` |
 | `docs/` | 契约、部署、验收和项目导航 | `DESIGN.md`、本文件 |
 

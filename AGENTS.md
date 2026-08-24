@@ -23,7 +23,7 @@
 > 当前运行方式：Termux 保留自研 Python Agent；云端仅提供模型 API。
 
 - Agent 单测：`python -m pytest agent/`（LLM 走 mock，不依赖真实模型）
-- 启动 Agent 服务：`python -m agent.server`（协议联调用 `python -m agent.server --mock`）
+- 启动 Agent 服务（推荐）：`./scripts/deploy_agent.sh`（自动建 venv/装依赖/校验配置/启动；`--background` 后台、`--mock` 联调、`--stop` 停止）；手动 `python -m agent.server`（协议联调用 `python -m agent.server --mock`）
 - 协议校验：`python -m bridge.validate`（对示例 JSON 做 schema 校验）
 - 云端模型配置：`cp config/cloud.yaml.example config/cloud.yaml`，填写后以 `python -m agent.server` 启动
 - 开发环境：`python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
@@ -37,7 +37,7 @@
 | `agent/ui_summarizer.py` | 原始 UI 树 XML → 紧凑交互节点列表（≤500 token） |
 | `bridge/` | 通信契约：JSON Schema 定义 + 校验器 |
 | `android/` | 原生执行侧 App（Kotlin）：UI 采集、动作执行（无障碍/Shizuku）、HTTP client、触发入口 |
-| `scripts/` | 协议冒烟与部署辅助脚本 |
+| `scripts/` | 协议冒烟与部署辅助脚本（`smoke_agent.py`、`deploy_agent.sh`） |
 | `docs/` | DESIGN.md（设计书）、PROJECT_PLAN.md（计划与进度） |
 
 ## Conventions

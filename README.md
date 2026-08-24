@@ -22,8 +22,7 @@ Android 与 Agent 仍只通过 `http://127.0.0.1:8080` 通信。模型 API Key �
 cd ~/tars-assistant
 cp config/cloud.yaml.example config/cloud.yaml
 # 编辑 config/cloud.yaml 后
-. .venv/bin/activate
-python -m agent.server
+./scripts/deploy_agent.sh              # 推荐：自动建 venv/装依赖/校验配置/启动
 ```
 
 `--mock` 仅用于协议联调：`python -m agent.server --mock`。

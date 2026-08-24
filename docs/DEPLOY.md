@@ -71,6 +71,21 @@ python -m agent.server --mock
 python scripts/smoke_agent.py
 ```
 
+### 一键部署脚本（推荐）
+
+手动步骤可整体交给自带脚本 `scripts/deploy_agent.sh`，自动完成环境检查、venv、依赖安装、配置校验与启动：
+
+```bash
+chmod +x scripts/deploy_agent.sh
+./scripts/deploy_agent.sh              # 前台启动（Ctrl+C 停止）
+./scripts/deploy_agent.sh --background # 后台（nohup，PID 写入 .agent.pid + /health 探活）
+./scripts/deploy_agent.sh --mock       # 协议联调（无需云端 Key）
+./scripts/deploy_agent.sh --stop       # 停止后台服务
+./scripts/deploy_agent.sh --help
+```
+
+脚本行为：检测 `python3`（缺失提示 `pkg install python`）、创建/复用 `.venv`、`pip install -r requirements.txt`、校验 `config/cloud.yaml`（缺失从示例复制并提醒填 Key；`api_key` 仍为占位符时警告）、检查 `:8080` 是否被占用，再启动 `agent.server`。`--background` 用 nohup 后台运行并写 `.agent.pid`，启动后自检 `GET /health`；`--stop` 按 PID 停止。输出为 `[INFO]/[ OK ]/[WARN]/[ERR ]` 颜色分层，非 TTY 自动退化为纯文本。
+
 ## 3. Android
 
 ```powershell
