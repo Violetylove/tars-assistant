@@ -45,6 +45,7 @@
 25. [x] 执行层修复验证：`ActionExecutor` 新增 `findEditableNode`（type 目标向下解析为实际可输入节点，先聚焦再 SET_TEXT），并统一 `agent/ui_summarizer.py` 与 Kotlin `collect()` 的类名可交互判定为 contains 语义。修复后复跑两次均 `type target=7 class=android.widget.EditText focused=true setText=true`，无障碍直写成功、无需 Shizuku 回退；收件人字段保留 `violetylove@163.com` 与联系人解析。
 26. [x] 真实云端模型端到端复验：聚焦意图（"open gmail compose email to violetylove@163.com do not send"）下，Agent 审计日志记录 `home → click → click → type → done` 五轮全绿；type 执行 `class=android.widget.EditText focused=true setText=true`，收件人字段填入 `violetylove@163.com` 并解析出联系人 Winter Yuan，修复在真实链路生效。首次尝试中模型曾引用无效节点 `type target=8 nodeFound=false`，执行层 fail-closed 安全收敛（未记录 history、停止任务）。
 27. [x] 真实云端敏感防线复验：模型点击含"发送"标签的节点（TARS 自身"发送给 TARS"）时，Android 强制弹出"确认 TARS 操作"；测试点击"取消"后回执为 `已取消: click`，点击未执行、任务安全停止（仅一轮请求），确认防线与失败收敛在真实模型下均生效。
+28. [x] 可见性规划 SYSTEM_PROMPT 优化验证（2026-08-24）：要求模型先做可见性规划（先图层再坐标）再决策，并写入"父不可见则子不可见"规则。真实链路（带标点意图 `open Gmail, then compose a new email. To violetylove@163.com, subject TARS test, body this is a test. Then stop, do not send.`）下，模型每轮思考均以"当前可见性规划"开头，先对照 `input_method@层1` 等窗口图层（z 轴），再核对坐标：识别出 `[12]`/`[13]`（y=1578/1576）被键盘层（起始 y=1507）覆盖而不可操作，同时正确判断 `[14] 主题 (540,1497)` 未被覆盖可点击；各轮均含"父容器可见"推断。与旧 prompt 对比：旧版用"建议面板底部 y=2263"当参照、忽略键盘层导致误判主题"未遮挡"，新版按图层+坐标精确判断。验证了"先图层再坐标"+父不可见子不可见均生效，且坚守"只给事实、模型自决策"原则（提示词未写任何具体场景）。
 
 ## 已完成验收
 
