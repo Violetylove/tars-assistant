@@ -227,7 +227,7 @@ def to_llm_line(node: dict) -> str:
     depth = int(node.get("depth", 0))
     container = (node.get("container") or "").strip()
     ind = "  " * depth  # 树缩进：父→子分组
-    line = f'{ind}[{node["id"]}] {typ}"{label}" ({cx},{cy}) [层{layer}] bounds=[{b[0]},{b[1]}][{b[2]},{b[3]}]'
+    line = f'{ind}[{node["id"]}] [层{layer}] {typ}"{label}" ({cx},{cy}) bounds=[{b[0]},{b[1]}][{b[2]},{b[3]}]'
     # 原始交互状态（仅列出为真的）：clickable/focusable/focused。
     flags = []
     if node.get("clickable"):

@@ -26,7 +26,7 @@ from agent.agent_loop import decide_once
 from agent.cloud_config import load_cloud_config
 from agent.llm_client import LLMClient
 from agent.skill_router import route_fixed_skill
-from agent.ui_summarizer import summarize_xml, to_llm_prompt
+from agent.ui_summarizer import summarize_xml, to_llm_prompt, to_window_layers
 
 logger = logging.getLogger("tars.server")
 
@@ -166,7 +166,11 @@ def agent_run(req: dict) -> dict:
         "DIAG prompt session=%s text=%r",
         req["session_id"], to_llm_prompt(_diag_nodes),
     )
-    # DIAG: window z-layer/region facts are now part of the merged prompt (see DIAG prompt).
+    # DIAG: expose the window z-layer/region facts fed to the model (merged into the prompt).
+    logger.info(
+        "DIAG window_layers session=%s text=%r",
+        req["session_id"], to_window_layers(diag_xml),
+    )
     # DIAG: inspect whether the suggestion row / peoplekit list is present and interactive
     _has_peoplekit = "peoplekit" in diag_xml
     _has_recycler = "RecyclerView" in diag_xml

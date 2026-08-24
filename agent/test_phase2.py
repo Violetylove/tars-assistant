@@ -110,7 +110,7 @@ def test_summarize_occludes_lower_layer_fully_covered_nodes():
 def test_to_llm_prompt_compact():
     nodes = summarize_xml(SIMPLE_XML)
     prompt = to_llm_prompt(nodes)
-    assert "[0] input" in prompt
+    assert "[0] [层0] input" in prompt
     assert "(400,250)" in prompt  # EditText 中心 x=(40+760)/2=400 y=(200+300)/2=250
     assert len(prompt.split()) <= 500
 
@@ -194,12 +194,19 @@ def test_interactive_state_and_bounds_merged_into_prompt_line():
     )
     prompt = to_llm_prompt(summarize_xml(xml))
     # 交互子节点行 = id + 层 + 完整矩形 + 可点击状态（合并进 prompt，不再有独立 context 块）。
-    assert "[0] text" in prompt
+    assert "[0] [层0] text" in prompt
     assert "bounds=[198,778][1036,894]" in prompt
     assert "violetylove@163.com" in prompt
     assert "clickable" in prompt
     # 父容器 RecyclerView 不可交互 → 不进节点列表。
     assert "peoplekit_autocomplete_results_recyclerview" not in prompt
+
+
+def test_decision_prompt_warns_on_empty_nodes():
+    message = _build_user_message("打开设置", [], [], app="com.android.settings", activity="com.example.Settings")
+    assert "当前屏幕节点：（空）" in message
+    assert "采集为空" in message
+    assert "wait(ms)" in message
 
 
 # ===== llm_client.extract_json =====

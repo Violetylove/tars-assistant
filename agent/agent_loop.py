@@ -42,7 +42,7 @@ SYSTEM_PROMPT = (
     "back, home, wait(ms), reply(给用户的话), done。\n"
     "  思考文字务必在前面（含可见性规划结论），JSON 指令放在回复的最后一行。当某一步做不了时指令为 "
     '{"type":"reply","text":"..."}；任务完成时指令为 {"type":"done"}。\n'
-    "节点行格式：[id] 类型\"文本\" (cx,cy) [层N]。click 和 type 的 target_node_id 必须是该节点"
+    '节点行格式：[id] [层N] 类型"文本" (cx,cy) bounds=[x1,y1][x2,y2] [clickable/focusable/focused]。click 和 type 的 target_node_id 必须是该节点'
     "的 JSON 整数（例如 1，绝不能写成字符串 \"1\"）。\n"
     "- [层N] 表示该节点所在窗口图层，N 越小图层越高（越在上）。"
     "bounds=[x1,y1][x2,y2] 是每个节点的完整矩形；行尾仅列出为真的状态词："
@@ -108,7 +108,10 @@ def _build_user_message(
         segs.extend(["上一轮屏幕节点（与当前对比，识别变化）：", previous_nodes])
     if window_layers:
         segs.extend(["窗口图层（z 轴）与区域：", window_layers])
-    segs.extend(["当前屏幕节点：", to_llm_prompt(nodes)])
+    if nodes:
+        segs.extend(["当前屏幕节点：", to_llm_prompt(nodes)])
+    else:
+        segs.append("当前屏幕节点：（空）——采集为空，请返回 wait(ms) 重新采集。")
     if app:
         segs.insert(1, f"当前前台应用包名：{app}")
     if app == TARS_PACKAGE:
