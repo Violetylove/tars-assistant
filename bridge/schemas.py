@@ -56,6 +56,26 @@ _COMMON_DEFS = {
                 "if": {"properties": {"type": {"const": "launch"}}},
                 "then": {"required": ["package_name"]},
             },
+            {
+                "if": {"properties": {"type": {"const": "click"}}},
+                "then": {"required": ["target_node_id"]},
+            },
+            {
+                "if": {"properties": {"type": {"const": "type"}}},
+                "then": {"required": ["target_node_id", "text"]},
+            },
+            {
+                "if": {"properties": {"type": {"const": "swipe"}}},
+                "then": {"required": ["x1", "y1", "x2", "y2", "duration_ms"]},
+            },
+            {
+                "if": {"properties": {"type": {"const": "wait"}}},
+                "then": {"required": ["ms"]},
+            },
+            {
+                "if": {"properties": {"type": {"const": "reply"}}},
+                "then": {"required": ["text"]},
+            },
         ],
     },
     "ui_node": {
@@ -72,6 +92,9 @@ _COMMON_DEFS = {
             },
             "clickable": {"type": "boolean"},
             "focused": {"type": "boolean"},
+            "layer": {"type": "integer", "minimum": 0},
+            "depth": {"type": "integer", "minimum": 0},
+            "container": {"type": "string"},
         },
         "required": ["id", "type", "clickable"],
         "additionalProperties": False,
@@ -124,6 +147,7 @@ SCHEMAS = {
             "app": {"type": "string"},
             "activity": {"type": "string"},
             "ui_xml": {"type": "string"},
+            "observation_note": {"type": "string", "maxLength": 500},
             "history": {
                 "type": "array",
                 "items": _ref("history_entry"),

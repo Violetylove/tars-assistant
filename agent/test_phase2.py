@@ -6,7 +6,7 @@ import pytest
 import requests
 from fastapi.testclient import TestClient
 
-from agent.ui_summarizer import summarize_xml, to_llm_prompt
+from agent.ui_summarizer import summarize_xml, to_window_layers, to_llm_prompt
 from agent.llm_client import CloudRequestError, LLMClient, MockLLM, extract_json
 from agent.agent_loop import _build_user_message, decide_once, run_decision_loop
 from agent import server
@@ -26,6 +26,20 @@ SIMPLE_XML = """<?xml version="1.0" encoding="utf-8"?>
         clickable="true"/>
   <node text="勿扰模式已开" resource-id="" class="android.widget.FrameLayout"
         bounds="[0,10][1080,60]" clickable="false"/>  <!-- 应被过滤 -->
+</hierarchy>
+"""
+
+COMPOSITE_CONTROL_XML = """<?xml version="1.0" encoding="utf-8"?>
+<hierarchy>
+  <node text="" content-desc="" class="android.view.ViewGroup"
+        bounds="[20,100][800,240]" clickable="true">
+    <node text="Project Atlas" content-desc="" class="android.widget.TextView"
+          bounds="[40,120][500,170]" clickable="false"/>
+    <node text="" content-desc="Synchronized" class="android.widget.TextView"
+          bounds="[40,180][500,220]" clickable="false"/>
+  </node>
+  <node text="Continue" content-desc="" class="android.widget.Button"
+        bounds="[20,300][400,380]" clickable="true"/>
 </hierarchy>
 """
 
@@ -55,17 +69,74 @@ def test_summarize_button_fields():
     assert btn["bounds"] == [240, 900, 600, 990]
 
 
+def test_summarize_preserves_descendant_labels_for_composite_control():
+    nodes = summarize_xml(COMPOSITE_CONTROL_XML)
+    # 只保留原有两个可操作节点；后代文本仅增强父节点语义，不生成新动作 ID。
+    assert [(node["id"], node["bounds"]) for node in nodes] == [
+        (0, [20, 100, 800, 240]),
+        (1, [20, 300, 400, 380]),
+    ]
+    assert nodes[0]["text"] == "Project Atlas / Synchronized"
+    assert nodes[1]["text"] == "Continue"
+
+
 def test_summarize_accepts_missing_ui_tree_as_empty_nodes():
     assert summarize_xml("") == []
     assert summarize_xml("   ") == []
 
 
+def test_summarize_occludes_lower_layer_fully_covered_nodes():
+    # 顶层 window layer=0：按钮 A 占据 [0,0][500,500]；底层 window layer=1：
+    # 按钮 B 位于 [100,100][300,300]（被 A 完全覆盖，应剔除），按钮 C 位于
+    # [600,100][900,300]（未被覆盖，应保留）。
+    xml = (
+        '<hierarchy>'
+        '<window layer="0">'
+        '<node text="A" class="android.widget.Button" bounds="[0,0][500,500]" clickable="true"/>'
+        '</window>'
+        '<window layer="1">'
+        '<node text="B" class="android.widget.Button" bounds="[100,100][300,300]" clickable="true"/>'
+        '<node text="C" class="android.widget.Button" bounds="[600,100][900,300]" clickable="true"/>'
+        '</window>'
+        '</hierarchy>'
+    )
+    nodes = summarize_xml(xml)
+    labels = [n["text"] for n in nodes]
+    assert "A" in labels
+    assert "B" not in labels  # 被上层 A 完全覆盖，视觉不可见
+    assert "C" in labels
+
+
 def test_to_llm_prompt_compact():
     nodes = summarize_xml(SIMPLE_XML)
     prompt = to_llm_prompt(nodes)
-    assert "[0] input" in prompt
+    assert "[0] [层0] input" in prompt
     assert "(400,250)" in prompt  # EditText 中心 x=(40+760)/2=400 y=(200+300)/2=250
     assert len(prompt.split()) <= 500
+
+
+def test_node_layer_and_window_facts_in_prompt():
+    # 每节点带层号 [层N]，且结构事实暴露 <window-info> 的图层与区域（供模型按 z 轴推断覆盖）。
+    xml = (
+        '<hierarchy screen_w="1080" screen_h="2340">'
+        '<window-info type="application" layer="0" bounds="[0,0][1080,2340]"/>'
+        '<window-info type="input_method" layer="1" bounds="[0,1593][1080,2340]"/>'
+        '<window-info type="system" layer="3" bounds="[0,0][1080,136]"/>'
+        '<window layer="0">'
+        '<node text="主题" class="android.widget.EditText" bounds="[100,2230][980,2300]" clickable="true"/>'
+        '</window>'
+        '</hierarchy>'
+    )
+    nodes = summarize_xml(xml)
+    assert nodes[0]["layer"] == 0
+    assert nodes[0]["clickable"] is True  # 主题 EditText clickable=true
+    prompt = to_llm_prompt(nodes)
+    assert "[层0]" in prompt
+    assert "bounds=[100,2230][980,2300]" in prompt  # 完整矩形已并入节点行
+    assert "clickable" in prompt                      # 可点击状态已并入节点行
+    layers = to_window_layers(xml)
+    assert "input_method@层1" in layers  # 非应用窗口（键盘）的图层/区域作为事实暴露给模型
+    assert "[0,1593][1080,2340]" in layers
 
 
 def test_decision_prompt_includes_optional_foreground_context():
@@ -77,6 +148,67 @@ def test_decision_prompt_includes_optional_foreground_context():
     assert "当前前台窗口类名：com.android.settings.Settings" in message
 
 
+def test_decision_prompt_includes_observation_note():
+    message = _build_user_message(
+        "打开设置", summarize_xml(SIMPLE_XML), [],
+        observation_note="上一轮动作未使界面发生变化（目标可能被遮挡）",
+    )
+    assert "注意（上一轮反馈）：上一轮动作未使界面发生变化" in message
+    assert message.index("注意（上一轮反馈）") < message.index("当前屏幕节点")
+
+
+def test_decision_prompt_marks_tars_as_non_operable():
+    msg = _build_user_message(
+        "打开设置", summarize_xml(SIMPLE_XML), [],
+        app="org.atovio.tars", activity="android.widget.FrameLayout",
+    )
+    assert "TARS 自身界面" in msg
+    assert "不要点击它们" in msg
+
+
+def test_decision_prompt_does_not_mark_other_apps():
+    msg = _build_user_message(
+        "打开设置", summarize_xml(SIMPLE_XML), [],
+        app="com.android.settings", activity="com.android.settings.Settings",
+    )
+    assert "TARS 自身界面" not in msg
+
+
+def test_decision_prompt_includes_previous_nodes():
+    prev_prompt = to_llm_prompt(summarize_xml(SIMPLE_XML))
+    message = _build_user_message(
+        "打开设置", summarize_xml(SIMPLE_XML), [],
+        previous_nodes=prev_prompt,
+    )
+    assert "上一轮屏幕节点（与当前对比，识别变化）：" in message
+    assert message.index("上一轮屏幕节点") < message.index("当前屏幕节点")
+
+
+def test_interactive_state_and_bounds_merged_into_prompt_line():
+    xml = (
+        '<hierarchy><window layer="0"><node package="com.google.android.gm" '
+        'resource-id="peoplekit_autocomplete_results_recyclerview" '
+        'class="android.support.v7.widget.RecyclerView" bounds="[0,610][1080,1496]">'
+        '<node text="violetylove@163.com" class="android.widget.TextView" '
+        'clickable="true" bounds="[198,778][1036,894]"/></node></window></hierarchy>'
+    )
+    prompt = to_llm_prompt(summarize_xml(xml))
+    # 交互子节点行 = id + 层 + 完整矩形 + 可点击状态（合并进 prompt，不再有独立 context 块）。
+    assert "[0] [层0] text" in prompt
+    assert "bounds=[198,778][1036,894]" in prompt
+    assert "violetylove@163.com" in prompt
+    assert "clickable" in prompt
+    # 父容器 RecyclerView 不可交互 → 不进节点列表。
+    assert "peoplekit_autocomplete_results_recyclerview" not in prompt
+
+
+def test_decision_prompt_warns_on_empty_nodes():
+    message = _build_user_message("打开设置", [], [], app="com.android.settings", activity="com.example.Settings")
+    assert "当前屏幕节点：（空）" in message
+    assert "采集为空" in message
+    assert "wait(ms)" in message
+
+
 # ===== llm_client.extract_json =====
 
 def test_extract_json_from_fence():
@@ -86,6 +218,18 @@ def test_extract_json_from_fence():
 
 def test_extract_json_from_plain():
     assert extract_json('{"type":"back"}') == {"type": "back"}
+
+
+def test_summarizer_keeps_zero_size_interactive_nodes_for_id_alignment():
+    xml = (
+        '<hierarchy><node text="零尺寸" class="android.widget.TextView" '
+        'clickable="true" bounds="[0,0][0,0]"/>'
+        '<node text="后续按钮" class="android.widget.Button" '
+        'clickable="true" bounds="[10,10][110,110]"/></hierarchy>'
+    )
+    nodes = summarize_xml(xml)
+    assert [node["text"] for node in nodes] == ["零尺寸", "后续按钮"]
+    assert [node["id"] for node in nodes] == [0, 1]
 
 
 def test_extract_json_invalid():
@@ -264,6 +408,19 @@ def test_server_rejects_bad_request():
     r = client.post("/agent/run", json=bad)
     assert r.status_code == 400
     assert "task_request 校验失败" in r.json()["detail"]
+
+
+def test_server_rejects_invalid_nonempty_ui_xml():
+    srv = _fresh_server()
+    client = TestClient(srv.app)
+    r = client.post("/agent/run", json={
+        "protocol_version": "1.0",
+        "session_id": "bad-ui",
+        "intent": "测试",
+        "ui_xml": "<hierarchy>",
+    })
+    assert r.status_code == 400
+    assert "不是合法 XML" in r.json()["detail"]
 
 
 def test_server_unconfigured_runtime_fails_closed():

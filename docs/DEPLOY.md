@@ -48,6 +48,14 @@ cp config/cloud.yaml.example config/cloud.yaml
 python -m agent.server
 ```
 
+Agent 日志默认同时输出到终端和当前目录的 `tars-agent.log`。在 Termux 后台读取：
+
+```sh
+run-as com.termux cat files/home/tars-assistant/tars-agent.log
+```
+
+也可通过 `--log-file <path>` 指定日志文件路径。
+
 Agent 只监听设备 loopback。启动后 Android App 的请求经 Agent 转发到云端模型，模型输出仍必须通过
 Python schema 校验与 Android 动作白名单、敏感操作确认。
 
@@ -99,8 +107,8 @@ Agent 正常启动时会以 INFO 记录请求/响应元数据：会话 ID、前�
 
 ## 4. 清理旧本地模型
 
-切换后可从设备的 Termux 中删除旧模型、模型服务二进制和诊断日志；不要删除 `~/tars-assistant` 或
-`.venv`，它们仍用于运行 Python Agent。具体命令见 `docs/AVD_TESTING.md` 的迁移记录。
+本地模型方案已废弃：从 Termux 中删除旧模型目录、`llama-server` 二进制和诊断日志即可；**不要删除**
+`~/tars-assistant` 或 `.venv`，它们仍用于运行 Python Agent（概要见 `docs/AVD_TESTING.md` 环境基线）。
 
 ## 5. 验收
 

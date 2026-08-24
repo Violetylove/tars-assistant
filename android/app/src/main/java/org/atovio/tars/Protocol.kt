@@ -11,6 +11,7 @@ data class TaskRequest(
     val uiXml: String? = null,
     val sessionId: String = UUID.randomUUID().toString(),
     val history: JSONArray = JSONArray(),
+    val observationNote: String? = null,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("protocol_version", "1.0")
@@ -19,6 +20,7 @@ data class TaskRequest(
         app?.let { put("app", it) }
         activity?.let { put("activity", it) }
         uiXml?.let { put("ui_xml", it) }
+        observationNote?.takeIf { it.isNotBlank() }?.let { put("observation_note", it) }
         put("history", history)
     }
 }
