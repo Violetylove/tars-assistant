@@ -18,8 +18,8 @@ gointo gmail then compose email to violetylove@163.com subject test subject body
 
 - 目标：验证模型在填入收件人 `violetylove@163.com`、Gmail 弹出「建议」匹配组件（Winter Yuan）
   后，能否继续填主题/正文并发送。
-- 备注：当前已知模型能填收件人，但曾因建议组件/新 UI 树延迟等问题停在前序步骤；需多次跑
-  以确认稳定性。
+- 备注：Gmail 建议卡会把主题/正文挤入输入法区，属**应用特有布局**；作为通用表单基准不通用，
+  稳定复测建议改用无该怪癖的应用（如 `打开联系人，新增联系人，名字填 Zhang San，电话填 13800138000，最后保存。`）。
 
 ## 打开系统设置（固定技能 / 白名单 launch）
 

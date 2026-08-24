@@ -103,7 +103,7 @@ Agent 无状态；`session_id` 由 App 生成并在每轮回传。
 
 Android 使用 `AccessibilityNodeInfo` 遍历并序列化 UI XML；`uiautomator dump` 仅为备用方案。Agent 侧 `ui_summarizer` 负责解析，Android 不做摘要决策。
 
-摘要节点包含：`id`（整数句柄）、`type`、`text`、`bounds`、`clickable`、`focused`。只保留可交互节点或带文本的可点击节点；交互节点的标签合并自身与可见后代的文本/描述，补全复合控件语义但不新增动作节点。类名匹配使用 `button/edittext/checkbox/radiobutton/switch/imagebutton` 的 contains 语义，必须与 Android 执行侧一致。
+摘要节点包含：`id`（整数句柄）、`type`、`text`、`bounds`、`clickable`、`focusable`、`focused`、`layer`、`depth`、`container`。只保留可交互节点或带文本的可点击节点；交互节点的标签合并自身与可见后代的文本/描述，补全复合控件语义但不新增动作节点。类名匹配使用 `button/edittext/checkbox/radiobutton/switch/imagebutton` 的 contains 语义，必须与 Android 执行侧一致。
 
 动作目标只能引用当前摘要中的节点。`type` 命中容器时，Android 必须向下解析到实际输入组件，先聚焦再设置文本。
 
@@ -126,8 +126,8 @@ Agent 当前使用 Python 自研安全循环；未来可替换编排框架，但
 
 ## 7. 当前状态
 
-- 已完成：基础协议、Agent 服务、云端接入、Android 执行侧、一期触发入口、AVD 基线和敏感操作确认。
-- 未闭环：Gmail 通用表单在建议组件/焦点变化后的连续观察与主题、正文输入；不得为 Gmail 增加专用状态机。
+- 已完成：基础协议、Agent 服务、云端接入、Android 执行侧、一期触发入口、AVD 基线、敏感操作确认；多图层 UI 采集、可见性规划（先图层再坐标）、窗口图层/完整矩形/交互状态并入 prompt、动作后新应用冷启动采集宽限与超时放宽。
+- 未闭环：Gmail 建议卡把主题/正文挤到输入法区这类**应用特有布局**不宜作为通用基准，改用表单覆盖后无该怪癖的应用（如联系人）实测；`awaitFresh`/冷启动采集已在 Android 端加固。
 - 二期候选：受限运行参数设置界面、精确启动目标应用、常驻唤醒词。
 
 实现变更前先更新本契约；过程记录和测试证据分别写入项目计划与 AVD 验收文档。

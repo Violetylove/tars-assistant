@@ -20,11 +20,12 @@
 | 参数 | 当前默认值 | 代码归属 | 建议范围/校验 |
 |---|---|---|---|
 | `max_observation_rounds` | `12` | `MainActivity.kt` `MAX_OBSERVATION_ROUNDS` | 正整数，建议 1–20；过低会截断突发组件后的多轮流程 |
-| `observation_timeout_ms` | `2000` | `MainActivity.kt` `OBSERVATION_TIMEOUT_MS` | 正整数，建议 500–10000；动作后等待 UI 变化的新鲜度窗口 |
+| `observation_timeout_ms` | `5000` | `MainActivity.kt` `OBSERVATION_TIMEOUT_MS` | 正整数，建议 2000–10000；动作后等待 UI 变化的新鲜度窗口；新应用冷启动时偏慢，不宜过短 |
 | `agent_loopback_host` | `127.0.0.1` | `AgentClient.kt` `baseUrl` | 仅允许 loopback：`127.0.0.1`/`::1`/`[::1]`；**拒绝任何非本机地址** |
 | `agent_loopback_port` | `8080` | `AgentClient.kt` `AGENT_PORT` | 正整数 1–65535；必须与服务端一致 |
 | `model_request_timeout_ms` | `210000` | `AgentClient.kt` `MODEL_REQUEST_TIMEOUT_MS` | 正整数，建议 ≥ 60_000（覆盖云端推理 + 重试预算）；过短会误判超时 |
 | `manual_reminder_delay_ms` | `900_000`（15 分钟） | `MainActivity.kt` `FIFTEEN_MINUTES_MS` | 正整数；定时提醒延迟，默认 15 分钟 |
+| `new_app_grace_ms` | `4000` | `TarsAccessibilityService.kt` `NEW_APP_GRACE_MS` | 正整数；新应用冷启动时为空树额外等待的宽限期，防止尚未渲染就判超时 |
 
 ## B 类 — 安全白名单（不开放）
 

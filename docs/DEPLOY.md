@@ -107,8 +107,8 @@ Agent 正常启动时会以 INFO 记录请求/响应元数据：会话 ID、前�
 
 ## 4. 清理旧本地模型
 
-切换后可从设备的 Termux 中删除旧模型、模型服务二进制和诊断日志；不要删除 `~/tars-assistant` 或
-`.venv`，它们仍用于运行 Python Agent。具体命令见 `docs/AVD_TESTING.md` 的迁移记录。
+本地模型方案已废弃：从 Termux 中删除旧模型目录、`llama-server` 二进制和诊断日志即可；**不要删除**
+`~/tars-assistant` 或 `.venv`，它们仍用于运行 Python Agent（概要见 `docs/AVD_TESTING.md` 环境基线）。
 
 ## 5. 验收
 
