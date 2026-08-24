@@ -191,7 +191,9 @@ class TarsAccessibilityService : AccessibilityService() {
         timeoutMs: Long,
         previousObservationVersion: Long = observationVersion,
     ): Boolean {
-        val deadline = android.os.SystemClock.elapsedRealtime() + timeoutMs
+        val start = android.os.SystemClock.elapsedRealtime()
+        val baseDeadline = start + timeoutMs
+        var deadline = baseDeadline
         Log.i(TAG_A11Y, String.format("awaitFresh prev_len=%d prev_pkg=%s prev_version=%d", previousUiXml.length, previousPackage, previousObservationVersion))
         // A single fresh signal can be a mid-transition snapshot: the previous app is still
         // serialised while the next app animates in, so the next round would observe a stale
@@ -214,6 +216,12 @@ class TarsAccessibilityService : AccessibilityService() {
             ))
             if (stable) return true
             stableCandidate = if (fresh) currentUiXml else null
+            // A newly-launched app (cold start) can render its accessibility tree slowly, staying
+            // blank for a couple of seconds. Give a package change a bounded grace so we don't
+            // time out and drop the capture before the tree settles.
+            if (pkgChanged && currentUiXml.isBlank() && android.os.SystemClock.elapsedRealtime() < baseDeadline + NEW_APP_GRACE_MS) {
+                deadline = baseDeadline + NEW_APP_GRACE_MS
+            }
             if (eventChanged) {
                 // Events frequently arrive before getWindows/rootInActiveWindow catches up. They
                 // trigger another sample but never prove that its XML is fresh on their own.
@@ -248,6 +256,8 @@ class TarsAccessibilityService : AccessibilityService() {
         const val ACTION_CONNECTED = "org.atovio.tars.ACCESSIBILITY_CONNECTED"
         @Volatile var instance: TarsAccessibilityService? = null
         private const val OBSERVATION_POLL_MS = 100L
+        // Extra wait for a freshly-launched app to render its accessibility tree (cold start).
+        private const val NEW_APP_GRACE_MS = 4_000L
         private const val TAG_A11Y = "TarsA11y"
     }
 }

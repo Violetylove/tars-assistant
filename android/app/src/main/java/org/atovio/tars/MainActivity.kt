@@ -108,10 +108,14 @@ class MainActivity : Activity() {
                             reachedRoundLimit = false
                             break
                         }
-                        if (service == null || !service.awaitFreshUiAfter(
+                        // A freshly-launched app is real progress: the action changed the
+                        // foreground, so even if awaitFresh timed out on a slowly-populating tree,
+                        // this must NOT be counted as "no change".
+                        val pkgChangedAfterAction = service != null && service.currentAppPackage() != null && service.currentAppPackage() != foreground
+                        if (service == null || (!service.awaitFreshUiAfter(
                                 uiXml, foreground, OBSERVATION_TIMEOUT_MS,
                                 observationVersion,
-                            )) {
+                            ) && !pkgChangedAfterAction)) {
                             // A no-op action (e.g. a target pushed off-screen by an overlay
                             // and re-created under a non-tree window) must not silently end the
                             // task. Re-collect the current (now stable) UI and ask the model to
@@ -269,7 +273,7 @@ class MainActivity : Activity() {
     companion object {
         private const val MAX_OBSERVATION_ROUNDS = 12
         private const val MAX_NO_CHANGE_ROUNDS = 2
-        private const val OBSERVATION_TIMEOUT_MS = 2_000L
+        private const val OBSERVATION_TIMEOUT_MS = 5_000L
         private const val UNKNOWN_FOREGROUND = "未知"
         private const val NO_CHANGE_NOTE = "上一轮动作未使界面发生变化（目标可能被遮挡、已出视口或不可达）。当前界面见本次新采集；请重新观察，选择其他能推进目标的动作。"
         private const val FIFTEEN_MINUTES_MS = 15 * 60 * 1000L
