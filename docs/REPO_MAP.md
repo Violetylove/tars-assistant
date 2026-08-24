@@ -58,7 +58,7 @@ MainActivity / 触发器
 |---|---|---|
 | `server.py` | `main`、`configure_runtime`、`agent_run` | FastAPI HTTP 门面、请求 XML 校验、固定技能优先路由、决策调用和日志。`--log-file` 同时输出后台日志文件。 |
 | `agent_loop.py` | `SYSTEM_PROMPT`、`_build_user_message`、`decide_once` | 将任务、动作节点、结构事实和历史交给模型；解析 JSON，规范化已知节点 ID，标记敏感点击。这里不定义具体 App 组件的业务语义。 |
-| `ui_summarizer.py` | `summarize_xml`、`to_llm_prompt`、`to_llm_context` | XML -> 有动作 ID 的紧凑节点列表；附带有界的原始结构事实。动作列表用于执行，结构事实仅供模型理解，不生成动作 ID。 |
+| `ui_summarizer.py` | `summarize_xml`、`to_llm_prompt`、`to_window_layers` | XML -> 有动作 ID 的紧凑节点列表（含层、完整矩形 bounds、可交互状态 clickable/focusable/focused）；窗口图层/区域事实经 `to_window_layers` 并入 prompt。动作列表用于执行，结构事实仅供模型理解，不生成动作 ID。 |
 | `llm_client.py` | `LLMClient`、`MockLLM`、`extract_json` | OpenAI-compatible 请求、有界重试、测试 mock。 |
 | `cloud_config.py` | `load_cloud_config` | 读取私有云端配置。 |
 | `skill_router.py` | `route_fixed_skill` | 固定技能短路；返回值同样必须符合协议。 |

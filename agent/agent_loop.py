@@ -20,23 +20,22 @@ from typing import Optional
 from bridge.schemas import PROTOCOL_VERSION
 from bridge.validate import validate, validate_action
 from agent.llm_client import MockLLM, extract_json
-from agent.ui_summarizer import summarize_xml, to_llm_context, to_llm_prompt
+from agent.ui_summarizer import summarize_xml, to_window_layers, to_llm_prompt
 
 logger = logging.getLogger("tars.agent_loop")
 
 SYSTEM_PROMPT = (
-    "你是一个手机界面操作助手。用户给出目标意图，你逐步操作手机完成它。\n"
+    "你是手机界面操作助手TARS的决策大脑。用户给出目标意图，你需要严格按照意图，逐步操作手机完成它。\n"
     "每一步按**固定流程**进行：先做可见性规划，再做决策。\n"
-    "第一步（必做，先图层再坐标）——对节点行里的每个节点，逐个判断其当前是否可见、可操作：\n"
+    "第一步（必做）——先对**本轮**节点逐个做可见性规划，再对比两轮找变化：\n"
     "- 先看图层（z 轴）：先与 \"窗口图层（z 轴）与区域\" 段对照，某节点若落在**更高图层**窗口的"
     "区域里，则被该窗口覆盖，当前不可操作（即使它有坐标）。\n"
     "- 再看坐标：没有被更高图层覆盖的，再看其坐标是否在当前可见区域内（未被临时组件挤到屏外）。\n"
     "- 父不可见则子不可见：若某节点的父容器不可见/不可操作（被覆盖、被挤出可见区、或高度为 0），"
     "则其所有子节点同样不可见/不可操作，即使子节点自身有坐标也不能操作。\n"
     "- 把结论写进思考：明确列出\"哪些节点当前可见可用、哪些不可见/被覆盖、为什么\"。\n"
+    "- 若提供了\"上一轮屏幕节点\"：完成本轮规划后，再**对比两轮**——本轮每个组件的可见性较上轮发生了哪些变化（哪些新增可见、哪些变为不可见、哪些位置/图层变了）；把这些变化及其含义写进思考。\n"
     "第二步——根据可见性规划结果做决策：\n"
-    "- 只对**可见可用**的节点执行 click/type；对不可见/被覆盖的节点，不直接点击，而是先做低风险"
-    "消除动作（点空白处、点安全的关闭按钮、点建议项确认、或收起浮层/键盘）让遮挡消失后再继续。\n"
     "- 动作前进性：优先选择能让你接近目标的操作。若一步后界面没有变化，重新做可见性规划再决定。\n"
     "- 最后单独输出一行、一个 JSON 对象作为你的指令，从以下动作中选择：\n"
     "  click(需 target_node_id), type(需 target_node_id+text), swipe(x1/y1/x2/y2/duration_ms), "
@@ -45,7 +44,9 @@ SYSTEM_PROMPT = (
     '{"type":"reply","text":"..."}；任务完成时指令为 {"type":"done"}。\n'
     "节点行格式：[id] 类型\"文本\" (cx,cy) [层N]。click 和 type 的 target_node_id 必须是该节点"
     "的 JSON 整数（例如 1，绝不能写成字符串 \"1\"）。\n"
-    "- [层N] 表示该节点所在窗口图层，N 越小图层越高（越在上）。\n"
+    "- [层N] 表示该节点所在窗口图层，N 越小图层越高（越在上）。"
+    "bounds=[x1,y1][x2,y2] 是每个节点的完整矩形；行尾仅列出为真的状态词："
+    "clickable（可点）、focusable（仅可聚焦、未必可点的容器）、focused（当前聚焦）。\n"
     "- 节点行按**树序**排列并**缩进**：缩进越深表示嵌套越深（某节点的子节点在其下用缩进表示）；"
     "行尾 <父容器> 是该节点的父容器标签，用以看出节点归属（如某节点属于\"建议\"面板还是\"主题\"区）。\n"
     "- 据此你能**想象出界面结构**：谁在哪个容器里、哪些是同一容器下的兄弟，从而判断哪个节点"
@@ -82,6 +83,9 @@ def extract_last_json(text: str):
 
 
 # Confirmation is derived from UI content, never trusted to the model's flag alone.
+TARS_PACKAGE = "org.atovio.tars"
+
+
 _SENSITIVE_LABELS = ("发送", "删除", "清除", "支付", "付款", "转账", "send", "delete", "pay")
 
 
@@ -91,19 +95,28 @@ def _build_user_message(
     history: list[dict],
     app: Optional[str] = None,
     activity: Optional[str] = None,
-    ui_context: str = "",
+    window_layers: str = "",
     observation_note: str = "",
+    previous_nodes: str = "",
 ) -> str:
     segs = [f"用户意图：{intent}"]
     if observation_note:
         # The execution side re-observed after an action produced no UI change. Tell the
         # model explicitly so it does not repeat a no-op decision on an unchanged tree.
         segs.append(f"注意（上一轮反馈）：{observation_note}")
+    if previous_nodes:
+        segs.extend(["上一轮屏幕节点（与当前对比，识别变化）：", previous_nodes])
+    if window_layers:
+        segs.extend(["窗口图层（z 轴）与区域：", window_layers])
     segs.extend(["当前屏幕节点：", to_llm_prompt(nodes)])
-    if ui_context:
-        segs.extend(["当前屏幕结构事实：", ui_context])
     if app:
         segs.insert(1, f"当前前台应用包名：{app}")
+    if app == TARS_PACKAGE:
+        segs.append(
+            "注意（事实）：当前前台是 TARS 自身界面（org.atovio.tars）——它是承载你的宿主应用，"
+            "其控制按钮（如“发送给 TARS”）不是目标任务的一部分，不要点击它们；"
+            "直接按用户意图执行（如回到桌面、启动目标应用）。"
+        )
     if activity:
         segs.insert(2 if app else 1, f"当前前台窗口类名：{activity}")
     if history:
@@ -182,6 +195,7 @@ def decide_once(
     app: Optional[str] = None,
     activity: Optional[str] = None,
     observation_note: str = "",
+    previous_nodes: str = "",
     max_retries: int = 1,
 ) -> dict:
     """单轮决策：摘要 + 调 LLM + 净化 + schema 校验。返回合法 agent_response。
@@ -192,7 +206,8 @@ def decide_once(
     nodes = summarize_xml(ui_xml)
     user_msg = _build_user_message(
         intent, nodes, history or [], app=app, activity=activity,
-        ui_context=to_llm_context(ui_xml), observation_note=observation_note,
+        window_layers=to_window_layers(ui_xml), observation_note=observation_note,
+        previous_nodes=previous_nodes,
     )
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},

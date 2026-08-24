@@ -63,7 +63,7 @@ class Summarizer:
         任一已覆盖矩形完全包含则剔除（视觉不可见），与执行侧 collectVisibleNodes 一致。
         """
         root = ET.fromstring(xml)
-        # 屏幕尺寸（窗口图层/区域事实见 to_llm_context 对 <window-info> 的解析）。
+        # 屏幕尺寸（窗口图层/区域事实见 to_window_layers 对 <window-info> 的解析）。
         screen_w = _int_attr(root, "screen_w")
         screen_h = _int_attr(root, "screen_h")
         # 递归行走：保留**树结构**（深度 + 父容器），id 用**树序**，让模型能想象出画面。
@@ -108,6 +108,7 @@ class Summarizer:
                 "text": self._semantic_text(elem),
                 "bounds": list(_bounds),
                 "clickable": _is_true(elem.get("clickable")),
+                "focusable": _is_true(elem.get("focusable")),
                 "focused": _is_true(elem.get("focused")),
                 "layer": _layer,
                 "depth": depth,           # 树深度：用于提示词缩进
@@ -215,8 +216,9 @@ def summarize_xml(xml: str, max_nodes: int = MAX_NODES) -> List[dict]:
 
 
 def to_llm_line(node: dict) -> str:
-    """结构化节点 → LLM 紧凑行：'[id] 类型\"text\" (cx,cy)'。"""
-    cx, cy = _center(node["bounds"])
+    """结构化节点 → LLM 紧凑行：id/层/类型/文本/中心/完整矩形/原始交互状态。"""
+    b = node.get("bounds") or [0, 0, 0, 0]
+    cx, cy = _center(b)
     typ = node["type"]
     if node.get("focused"):
         typ = f"{typ}(focused)"
@@ -225,7 +227,17 @@ def to_llm_line(node: dict) -> str:
     depth = int(node.get("depth", 0))
     container = (node.get("container") or "").strip()
     ind = "  " * depth  # 树缩进：父→子分组
-    line = f"{ind}[{node['id']}] {typ}\"{label}\" ({cx},{cy}) [层{layer}]"
+    line = f'{ind}[{node["id"]}] {typ}"{label}" ({cx},{cy}) [层{layer}] bounds=[{b[0]},{b[1]}][{b[2]},{b[3]}]'
+    # 原始交互状态（仅列出为真的）：clickable/focusable/focused。
+    flags = []
+    if node.get("clickable"):
+        flags.append("clickable")
+    if node.get("focusable"):
+        flags.append("focusable")
+    if node.get("focused"):
+        flags.append("focused")
+    if flags:
+        line += " " + " ".join(flags)
     if container:
         line += f" <{container}>"
     return line
@@ -237,49 +249,19 @@ def to_llm_prompt(nodes: List[dict]) -> str:
     return "\n".join(lines)
 
 
-def to_llm_context(xml: str, max_chars: int = 4500) -> str:
-    """Expose bounded structural UI facts without assigning semantic roles."""
+def to_window_layers(xml: str) -> str:
+    """提取窗口图层/区域事实（含不在 UI 节点树里的输入法/系统/浮层窗口）。
+
+    模型据 <window-info> 的 type/layer/bounds 按 z 轴推断遮挡；这些窗口不一定有
+    节点行，故作为"窗口图层（z 轴）与区域"段喂给模型（决策层不做遮挡结论）。
+    """
     if not (xml or "").strip():
         return ""
     root = ET.fromstring(xml)
-    lines: list[str] = ["结构事实（仅原始无障碍属性，不代表语义判断）："]
-    # 窗口图层/区域事实（含不在 UI 节点树里的输入法/系统/浮层窗口）——模型据此按 z 轴推断遮挡。
     win_infos = [w for w in root.iter() if w.tag == "window-info"]
-    if win_infos:
-        renders = []
-        for w in win_infos:
-            renders.append(f"{w.get('type', '?')}@层{w.get('layer', '?')} {w.get('bounds', '')}")
-        lines.append(f"窗口图层（z 轴）与区域：{'; '.join(renders)}")
-
-    def walk(elem: ET.Element, path: list[str], window: str) -> None:
-        if elem.tag == "window":
-            window = f"window#{elem.get('layer', '0')}"
-            path = []
-        if elem.tag == "node":
-            text = (elem.get("text") or "").replace("\n", " ").strip()
-            desc = (elem.get("content-desc") or "").replace("\n", " ").strip()
-            resource_id = elem.get("resource-id") or ""
-            class_name = elem.get("class") or ""
-            package = elem.get("package") or ""
-            bounds = elem.get("bounds") or ""
-            clickable = elem.get("clickable") or "false"
-            focusable = elem.get("focusable") or "false"
-            focused = elem.get("focused") or "false"
-            interesting = text or desc or resource_id or clickable == "true" or focusable == "true" or focused == "true"
-            node_path = "/".join(path[-3:]) or "node"
-            if interesting:
-                attrs = " ".join(
-                    f"{key}={value!r}" for key, value in (
-                        ("text", text), ("desc", desc), ("id", resource_id),
-                        ("class", class_name), ("pkg", package), ("bounds", bounds),
-                        ("clickable", clickable), ("focusable", focusable),
-                        ("focused", focused),
-                    ) if value
-                )
-                lines.append(f"- {window} path={node_path} {attrs}")
-            path = path + [resource_id or class_name or "node"]
-        for child in list(elem):
-            walk(child, path, window)
-
-    walk(root, [], "hierarchy")
-    return "\n".join(lines)[:max_chars]
+    if not win_infos:
+        return ""
+    return "\n".join(
+        f"- {w.get('type', '?')}@层{w.get('layer', '?')} bounds={w.get('bounds', '')}"
+        for w in win_infos
+    )

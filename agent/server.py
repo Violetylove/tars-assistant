@@ -75,6 +75,10 @@ def configure_runtime(*, mock: bool = False, base_url: str = "", model: str = ""
     )
     decision_fn = lambda **kwargs: decide_once(llm=llm, **kwargs)
 
+# Session-level cache of the previous round's node lines, so the model can compare two
+# consecutive UI snapshots and reason about what changed (facts only, no attribution).
+_prev_nodes: dict[str, str] = {}
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the TARS loopback Agent service")
@@ -162,6 +166,7 @@ def agent_run(req: dict) -> dict:
         "DIAG prompt session=%s text=%r",
         req["session_id"], to_llm_prompt(_diag_nodes),
     )
+    # DIAG: window z-layer/region facts are now part of the merged prompt (see DIAG prompt).
     # DIAG: inspect whether the suggestion row / peoplekit list is present and interactive
     _has_peoplekit = "peoplekit" in diag_xml
     _has_recycler = "RecyclerView" in diag_xml
@@ -201,7 +206,9 @@ def agent_run(req: dict) -> dict:
             app=req.get("app"),
             activity=req.get("activity"),
             observation_note=req.get("observation_note", ""),
+            previous_nodes=_prev_nodes.get(req["session_id"], ""),
         )
+        _prev_nodes[req["session_id"]] = to_llm_prompt(_diag_nodes)
         response = _validate_response_for_request(resp, req["session_id"])
         logger.info("agent response session=%s source=llm actions=%s done=%s observe=%s",
                     req["session_id"], [a.get("type") for a in response.get("actions", [])],

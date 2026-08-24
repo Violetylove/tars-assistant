@@ -6,7 +6,7 @@ import pytest
 import requests
 from fastapi.testclient import TestClient
 
-from agent.ui_summarizer import summarize_xml, to_llm_context, to_llm_prompt
+from agent.ui_summarizer import summarize_xml, to_window_layers, to_llm_prompt
 from agent.llm_client import CloudRequestError, LLMClient, MockLLM, extract_json
 from agent.agent_loop import _build_user_message, decide_once, run_decision_loop
 from agent import server
@@ -129,11 +129,14 @@ def test_node_layer_and_window_facts_in_prompt():
     )
     nodes = summarize_xml(xml)
     assert nodes[0]["layer"] == 0
+    assert nodes[0]["clickable"] is True  # 主题 EditText clickable=true
     prompt = to_llm_prompt(nodes)
     assert "[层0]" in prompt
-    context = to_llm_context(xml)
-    assert "input_method@层1" in context  # 非应用窗口（键盘）的图层/区域作为事实暴露给模型
-    assert "[0,1593][1080,2340]" in context
+    assert "bounds=[100,2230][980,2300]" in prompt  # 完整矩形已并入节点行
+    assert "clickable" in prompt                      # 可点击状态已并入节点行
+    layers = to_window_layers(xml)
+    assert "input_method@层1" in layers  # 非应用窗口（键盘）的图层/区域作为事实暴露给模型
+    assert "[0,1593][1080,2340]" in layers
 
 
 def test_decision_prompt_includes_optional_foreground_context():
@@ -154,7 +157,34 @@ def test_decision_prompt_includes_observation_note():
     assert message.index("注意（上一轮反馈）") < message.index("当前屏幕节点")
 
 
-def test_structural_context_preserves_raw_window_and_node_facts():
+def test_decision_prompt_marks_tars_as_non_operable():
+    msg = _build_user_message(
+        "打开设置", summarize_xml(SIMPLE_XML), [],
+        app="org.atovio.tars", activity="android.widget.FrameLayout",
+    )
+    assert "TARS 自身界面" in msg
+    assert "不要点击它们" in msg
+
+
+def test_decision_prompt_does_not_mark_other_apps():
+    msg = _build_user_message(
+        "打开设置", summarize_xml(SIMPLE_XML), [],
+        app="com.android.settings", activity="com.android.settings.Settings",
+    )
+    assert "TARS 自身界面" not in msg
+
+
+def test_decision_prompt_includes_previous_nodes():
+    prev_prompt = to_llm_prompt(summarize_xml(SIMPLE_XML))
+    message = _build_user_message(
+        "打开设置", summarize_xml(SIMPLE_XML), [],
+        previous_nodes=prev_prompt,
+    )
+    assert "上一轮屏幕节点（与当前对比，识别变化）：" in message
+    assert message.index("上一轮屏幕节点") < message.index("当前屏幕节点")
+
+
+def test_interactive_state_and_bounds_merged_into_prompt_line():
     xml = (
         '<hierarchy><window layer="0"><node package="com.google.android.gm" '
         'resource-id="peoplekit_autocomplete_results_recyclerview" '
@@ -162,11 +192,14 @@ def test_structural_context_preserves_raw_window_and_node_facts():
         '<node text="violetylove@163.com" class="android.widget.TextView" '
         'clickable="true" bounds="[198,778][1036,894]"/></node></window></hierarchy>'
     )
-    context = to_llm_context(xml)
-    assert "window#0" in context
-    assert "peoplekit_autocomplete_results_recyclerview" in context
-    assert "violetylove@163.com" in context
-    assert "bounds='[198,778][1036,894]'" in context
+    prompt = to_llm_prompt(summarize_xml(xml))
+    # 交互子节点行 = id + 层 + 完整矩形 + 可点击状态（合并进 prompt，不再有独立 context 块）。
+    assert "[0] text" in prompt
+    assert "bounds=[198,778][1036,894]" in prompt
+    assert "violetylove@163.com" in prompt
+    assert "clickable" in prompt
+    # 父容器 RecyclerView 不可交互 → 不进节点列表。
+    assert "peoplekit_autocomplete_results_recyclerview" not in prompt
 
 
 # ===== llm_client.extract_json =====
