@@ -88,6 +88,9 @@ def extract_last_json(text: str):
 # Confirmation is derived from UI content, never trusted to the model's flag alone.
 TARS_PACKAGE = "org.atovio.tars"
 
+_HISTORY_MAX_ROUNDS = 3
+_HISTORY_TEXT_LIMIT = 80
+
 
 _SENSITIVE_LABELS = ("发送", "删除", "清除", "支付", "付款", "转账", "send", "delete", "pay")
 
@@ -135,8 +138,75 @@ def _build_user_message(
         segs.append("允许启动的应用：空（不得猜测包名或输出 launch）。")
     if history:
         segs.append("前面的动作/观察：")
-        segs.extend(json.dumps(h, ensure_ascii=False) for h in history)
+        segs.append(_compact_history_for_prompt(history))
     return "\n".join(segs)
+
+
+def _truncate_history_text(value: object) -> str:
+    text = str(value or "")
+    if len(text) <= _HISTORY_TEXT_LIMIT:
+        return text
+    return text[:_HISTORY_TEXT_LIMIT - 1].rstrip() + "…"
+
+
+def _compact_action_for_prompt(action: object) -> str:
+    """Render an action as a small, stable prompt signature.
+
+    The protocol still carries the complete action JSON. This representation is
+    only for model context, where repeating every optional field wastes tokens.
+    """
+    if not isinstance(action, dict):
+        return _truncate_history_text(action)
+    action_type = action.get("type", "?")
+    if action_type in {"click", "type"}:
+        node_id = action.get("target_node_id", "?")
+        if action_type == "type":
+            text = json.dumps(_truncate_history_text(action.get("text")), ensure_ascii=False)
+            return f"type(node={node_id},text={text})"
+        return f"click(node={node_id})"
+    if action_type == "launch":
+        return f"launch({action.get('package_name', '?')})"
+    if action_type == "wait":
+        return f"wait({action.get('ms', '?')}ms)"
+    if action_type == "swipe":
+        coords = ",".join(str(action.get(key, "?")) for key in ("x1", "y1", "x2", "y2"))
+        return f"swipe({coords},{action.get('duration_ms', '?')}ms)"
+    if action_type in {"back", "home", "done"}:
+        return action_type
+    if action_type == "reply":
+        return f"reply({_truncate_history_text(action.get('text'))})"
+    return _truncate_history_text(action_type)
+
+
+def _compact_action_sequence(actions: object) -> str:
+    if not isinstance(actions, list) or not actions:
+        return "（无动作）"
+    signatures = [_compact_action_for_prompt(action) for action in actions]
+    compacted: list[str] = []
+    index = 0
+    while index < len(signatures):
+        end = index + 1
+        while end < len(signatures) and signatures[end] == signatures[index]:
+            end += 1
+        count = end - index
+        compacted.append(f"{signatures[index]} x{count}" if count > 1 else signatures[index])
+        index = end
+    return "; ".join(compacted)
+
+
+def _compact_history_for_prompt(history: list[dict], max_rounds: int = _HISTORY_MAX_ROUNDS) -> str:
+    """Keep recent action context while bounding prompt growth across rounds."""
+    if not history:
+        return ""
+    selected = history[-max_rounds:]
+    lines: list[str] = []
+    omitted = len(history) - len(selected)
+    if omitted > 0:
+        lines.append(f"（更早历史已省略 {omitted} 轮）")
+    first_round = len(history) - len(selected) + 1
+    for offset, entry in enumerate(selected):
+        lines.append(f"第{first_round + offset}轮：{_compact_action_sequence(entry.get('actions') if isinstance(entry, dict) else entry)}")
+    return "\n".join(lines)
 
 
 @dataclass

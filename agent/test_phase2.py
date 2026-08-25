@@ -53,11 +53,11 @@ def _fresh_server():
 
 # ===== ui_summarizer =====
 
-def test_summarize_filters_and_sorts():
+def test_summarize_filters_and_preserves_tree_order():
     nodes = summarize_xml(SIMPLE_XML)
     # 过滤：TextView(不可点) 与 FrameLayout(不可点) 应被剔除
     assert len(nodes) == 2  # EditText + Button
-    # 排序：EditText(y=200) 在 Button(y=900) 之上
+    # 保持树序：EditText 在 Button 之前
     assert nodes[0]["type"] == "input"
     assert nodes[1]["type"] == "button"
     assert nodes[0]["focused"] is True
@@ -183,6 +183,22 @@ def test_decision_prompt_includes_previous_nodes():
     )
     assert "上一轮界面变化摘要（与当前对比）：" in message
     assert message.index("上一轮界面变化摘要") < message.index("当前屏幕节点")
+
+
+def test_decision_prompt_compacts_recent_action_history():
+    history = [
+        {"actions": [{"type": "back"}]},
+        {"actions": [{"type": "launch", "package_name": "com.example.old"}]},
+        {"actions": [{"type": "click", "target_node_id": 3}, {"type": "click", "target_node_id": 3}]},
+        {"actions": [{"type": "type", "target_node_id": 4, "text": "x" * 100}]},
+    ]
+    message = _build_user_message("继续", [], history)
+    assert "更早历史已省略 1 轮" in message
+    assert "第2轮：launch(com.example.old)" in message
+    assert "第3轮：click(node=3) x2" in message
+    assert 'type(node=4,text="' in message
+    assert "x" * 90 not in message
+    assert '"actions"' not in message
 
 
 def _diff_node(node_id, text="按钮", *, resource_id="", bounds=None, focused=False):
@@ -665,56 +681,28 @@ def test_server_accepts_request_without_ui_tree_in_mock_mode():
     assert response["actions"] == []
 
 
-def test_server_routes_allowlisted_open_app_skill_without_model():
+@pytest.mark.parametrize(
+    ("session_id", "intent", "label", "package_name"),
+    [
+        ("open-settings", "打开设置", "设置", "com.android.settings"),
+        ("open-settings-en", "open settings", "Settings", "com.android.settings"),
+        ("open-gmail", "open gmail", "Gmail", "com.google.android.gm"),
+        ("open-tars", "open tars", "TARS", "org.atovio.tars"),
+    ],
+)
+def test_server_routes_allowlisted_open_app_skills_without_model(
+    session_id, intent, label, package_name,
+):
     srv = _fresh_server()
     response = srv.agent_run({
         "protocol_version": "1.0",
-        "session_id": "open-settings",
-        "intent": "打开设置",
-        "launchable_apps": [{"label": "设置", "package_name": "com.android.settings"}],
+        "session_id": session_id,
+        "intent": intent,
+        "launchable_apps": [{"label": label, "package_name": package_name}],
     })
     assert response["done"] is False
     assert response["need_observation"] is True
-    assert response["actions"] == [{"type": "launch", "package_name": "com.android.settings"}]
-
-
-def test_server_routes_english_open_settings_skill_without_model():
-    srv = _fresh_server()
-    response = srv.agent_run({
-        "protocol_version": "1.0",
-        "session_id": "open-settings-en",
-        "intent": "open settings",
-        "launchable_apps": [{"label": "Settings", "package_name": "com.android.settings"}],
-    })
-    assert response["done"] is False
-    assert response["need_observation"] is True
-    assert response["actions"] == [{"type": "launch", "package_name": "com.android.settings"}]
-
-
-def test_server_routes_open_gmail_skill_without_model():
-    srv = _fresh_server()
-    response = srv.agent_run({
-        "protocol_version": "1.0",
-        "session_id": "open-gmail",
-        "intent": "open gmail",
-        "launchable_apps": [{"label": "Gmail", "package_name": "com.google.android.gm"}],
-    })
-    assert response["done"] is False
-    assert response["need_observation"] is True
-    assert response["actions"] == [{"type": "launch", "package_name": "com.google.android.gm"}]
-
-
-def test_server_routes_open_tars_skill_to_current_application_id():
-    srv = _fresh_server()
-    response = srv.agent_run({
-        "protocol_version": "1.0",
-        "session_id": "open-tars",
-        "intent": "open tars",
-        "launchable_apps": [{"label": "TARS", "package_name": "org.atovio.tars"}],
-    })
-    assert response["done"] is False
-    assert response["need_observation"] is True
-    assert response["actions"] == [{"type": "launch", "package_name": "org.atovio.tars"}]
+    assert response["actions"] == [{"type": "launch", "package_name": package_name}]
 
 
 def test_cloud_config_rejects_placeholder_values(tmp_path):
