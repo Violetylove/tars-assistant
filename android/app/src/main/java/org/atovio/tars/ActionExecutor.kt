@@ -5,34 +5,42 @@ import android.graphics.Rect
 import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
 import android.util.Log
+import org.json.JSONObject
 
 class ActionExecutor(
     private val service: AccessibilityService,
     private val confirm: (AgentAction) -> Boolean,
     private val shizuku: ShizukuGateway = ShizukuGateway(),
+    private val sessionId: String = "-",
 ) {
     data class ExecutionSummary(val messages: List<String>, val completed: Boolean)
 
     fun execute(actions: List<AgentAction>): ExecutionSummary {
         val results = mutableListOf<String>()
         for (action in actions) {
+            diagnostic("command=${actionJson(action)}")
             if (action.type !in ALLOWED) {
                 results += "拒绝未知动作: ${action.type}"
+                diagnostic("result=reject reason=unknown_action action=${action.type}")
                 return ExecutionSummary(results, completed = false)
             }
             if (!wellFormed(action)) {
                 results += "拒绝参数不完整: ${action.type}"
+                diagnostic("result=reject reason=malformed action=${action.type}")
                 return ExecutionSummary(results, completed = false)
             }
             if (requiresConfirmation(action) && !confirm(action)) {
                 results += "已取消: ${action.type}"
+                diagnostic("result=cancelled action=${action.type}")
                 return ExecutionSummary(results, completed = false)
             }
             if (!executeOne(action)) {
                 results += "执行失败: ${action.type}"
+                diagnostic("result=failed action=${action.type}")
                 return ExecutionSummary(results, completed = false)
             }
             results += "已执行: ${actionTrace(action)}"
+            diagnostic("result=success action=${action.type}")
         }
         return ExecutionSummary(results, completed = true)
     }
@@ -58,7 +66,11 @@ class ActionExecutor(
 
     private fun executeOne(action: AgentAction): Boolean {
         return when (action.type) {
-            "click" -> findNode(action.targetNodeId)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+            "click" -> findNode(action.targetNodeId).let { node ->
+                val result = node?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+                diagnostic("execute=click target_node_id=${action.targetNodeId} resolved=${nodeDescription(node)} result=$result")
+                result
+            }
             "type" -> findEditableNode(action.targetNodeId)?.let { node ->
                 // 先确保目标输入框聚焦，再尝试无障碍 SET_TEXT；失败才回退 Shizuku input text，
                 // 此时焦点已落在目标字段，注入不会落到错误位置。
@@ -67,10 +79,13 @@ class ActionExecutor(
                     putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, action.text.orEmpty())
                 })
                 Log.i(TAG, "type target=${action.targetNodeId} class=${node.className} focused=$focused setText=$setText")
-                setText || shizuku.typeText(action.text.orEmpty())
+                val result = setText || shizuku.typeText(action.text.orEmpty())
+                diagnostic("execute=type target_node_id=${action.targetNodeId} text=${quote(action.text.orEmpty())} resolved=${nodeDescription(node)} focused=$focused set_text=$setText result=$result")
+                result
             }?.also { Log.i(TAG, "type target=${action.targetNodeId} nodeFound=true result=$it")
             } ?: run {
                 Log.w(TAG, "type target=${action.targetNodeId} nodeFound=false")
+                diagnostic("execute=type target_node_id=${action.targetNodeId} resolved=<missing> result=false")
                 false
             }
             "back" -> service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
@@ -95,6 +110,32 @@ class ActionExecutor(
         "launch" -> "launch (${action.packageName})"
         else -> action.type
     }
+
+    private fun diagnostic(message: String) {
+        AndroidLogStore.append(service, "session=$sessionId $message")
+    }
+
+    private fun nodeDescription(node: AccessibilityNodeInfo?): String {
+        if (node == null) return "<missing>"
+        val bounds = Rect().also(node::getBoundsInScreen)
+        return "{class=${quote(node.className?.toString().orEmpty())},text=${quote(node.text?.toString().orEmpty())},desc=${quote(node.contentDescription?.toString().orEmpty())},resource_id=${quote(node.viewIdResourceName.orEmpty())},bounds=[$bounds],clickable=${node.isClickable},focusable=${node.isFocusable},enabled=${node.isEnabled}}"
+    }
+
+    private fun actionJson(action: AgentAction): String = JSONObject().apply {
+        put("type", action.type)
+        action.targetNodeId?.let { put("target_node_id", it) }
+        action.text?.let { put("text", it) }
+        action.packageName?.let { put("package_name", it) }
+        action.ms?.let { put("ms", it) }
+        action.x1?.let { put("x1", it) }
+        action.y1?.let { put("y1", it) }
+        action.x2?.let { put("x2", it) }
+        action.y2?.let { put("y2", it) }
+        action.durationMs?.let { put("duration_ms", it) }
+        put("requires_confirmation", action.requiresConfirmation)
+    }.toString()
+
+    private fun quote(value: String): String = JSONObject.quote(value.replace('\n', ' '))
 
     private fun findNode(id: Int?): AccessibilityNodeInfo? {
         if (id == null) return null

@@ -238,8 +238,12 @@ class TarsAccessibilityService : AccessibilityService() {
         return false
     }
 
-    fun execute(actions: List<AgentAction>, confirm: (AgentAction) -> Boolean = { false }): ActionExecutor.ExecutionSummary =
-        ActionExecutor(this, confirm).execute(actions)
+    fun execute(
+        actions: List<AgentAction>,
+        confirm: (AgentAction) -> Boolean = { false },
+        sessionId: String = "-",
+    ): ActionExecutor.ExecutionSummary =
+        ActionExecutor(this, confirm, sessionId = sessionId).execute(actions)
 
     fun toggleFloatingVoice(): Boolean {
         floatingVoiceOverlay?.let { it.hide(); floatingVoiceOverlay = null; return false }

@@ -54,8 +54,8 @@ Agent 日志默认同时输出到终端和项目根目录的 `log/agent/agent.lo
 run-as com.termux cat files/home/tars-assistant/log/agent/agent.log
 ```
 
-也可通过 `--log-file <path>` 指定日志文件路径。Android 设置页的“发送 Android 日志”会通过
-`POST /logs/android` 上传应用日志，服务端保存到项目根目录的 `log/android/`。
+也可通过 `--log-file <path>` 指定日志文件路径。Agent 日志不会记录原始 UI XML。Android 设置页的“发送 Android 日志”会通过
+`POST /logs/android` 上传应用日志，服务端保存到项目根目录的 `log/android/`；该诊断日志会记录原始 XML、模型下发的动作和实际解析到的执行节点，使用与 Agent 相同的短会话 ID 关联每轮任务。
 
 Agent 只监听设备 loopback。启动后 Android App 的请求经 Agent 转发到云端模型，模型输出仍必须通过
 Python schema 校验与 Android 动作白名单、敏感操作确认。

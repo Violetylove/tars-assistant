@@ -15,6 +15,10 @@ object AndroidLogStore {
     fun file(context: Context): File = File(context.filesDir, "$DIRECTORY/$FILE_NAME")
 
     fun append(context: Context, message: String) {
+        appendBlock(context, message)
+    }
+
+    fun appendBlock(context: Context, message: String) {
         synchronized(lock) {
             val target = file(context)
             target.parentFile?.mkdirs()

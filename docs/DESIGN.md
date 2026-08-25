@@ -39,7 +39,7 @@ Termux Agent (Python/FastAPI)
 7. 需要观察时，动作后重新采集 UI；界面新鲜度成立才进入下一轮，否则安全停止。
 8. `done` 或终态 `reply` 结束任务并展示结果。
 
-Agent 无状态；`session_id` 由 App 生成并在每轮回传。
+Agent 无状态；`session_id` 由 App 生成并在每轮回传。App 使用 16 位十六进制会话标识，Android 与 Agent 日志以同一标识关联一次任务。
 
 ## 3. HTTP 协议
 
@@ -51,6 +51,7 @@ Agent 无状态；`session_id` 由 App 生成并在每轮回传。
 |---|---|---|
 | `GET` | `/health` | 存活检查 |
 | `POST` | `/agent/run` | 单轮决策请求 |
+| `POST` | `/logs/android` | 接收用户主动上传的 Android 诊断日志 |
 
 ### 3.1 `task_request`
 
@@ -117,7 +118,7 @@ Android 使用 `AccessibilityNodeInfo` 遍历并序列化 UI XML；`uiautomator 
 3. **敏感操作确认**：发送、删除、支付、转账等目标即使模型未标记，也由 Python 和 Android 按当前节点文本再次判定并要求用户确认。
 4. **失败即收敛**：动作被拒绝、取消、失败或无法观察到新鲜 UI 时，停止本轮后续动作和观察，不把未执行动作写入历史。
 5. **权限隔离**：Shizuku 只暴露参数受限的输入/滑动方法；云端不可直接访问设备。
-6. **日志最小化**：审计日志只记录会话、前台上下文、节点数、动作类型和观察状态，不记录任务正文、原始 UI、输入文本、模型原文或凭据。
+6. **日志分层**：Agent 审计日志不记录原始 UI XML；Android 本地诊断日志记录同一 `session_id` 下每轮采集的原始 XML、Agent 返回的完整动作及其解析到的实际执行节点，仅在用户主动选择“发送 Android 日志”时上传。两类日志均不得记录凭据。
 
 ## 6. 模型与可靠性
 

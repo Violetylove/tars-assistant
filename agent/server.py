@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
@@ -31,13 +30,6 @@ from agent.ui_summarizer import summarize_xml, to_llm_prompt
 from agent.ui_diff import render_ui_diff
 
 logger = logging.getLogger("tars.server")
-
-_RAW_UI_LOG_ENV = "TARS_LOG_RAW_UI"
-
-
-def _raw_ui_logging_enabled() -> bool:
-    return os.getenv(_RAW_UI_LOG_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
-
 
 def _port(value: str) -> int:
     try:
@@ -188,19 +180,13 @@ def agent_run(req: dict) -> dict:
         req["session_id"], req.get("app") or "-", req.get("activity") or "-",
         ui_xml.count("<node"), len(req.get("history") or []),
     )
-    diag_xml = req.get("ui_xml") or ""
     logger.info(
         "agent context session=%s intent=%r app=%r activity=%r ui_bytes=%d observation=%r launchable_apps=%d",
         req["session_id"], req.get("intent"), req.get("app"), req.get("activity"),
-        len(diag_xml), req.get("observation_note") or "",
+        len(ui_xml), req.get("observation_note") or "",
         len(req.get("launchable_apps") or []),
     )
-    if _raw_ui_logging_enabled():
-        logger.warning(
-            "raw ui enabled session=%s app=%s bytes=%d xml=%r",
-            req["session_id"], req.get("app") or "-", len(diag_xml), diag_xml,
-        )
-    _diag_nodes = summarize_xml(diag_xml)
+    _diag_nodes = summarize_xml(ui_xml)
     try:
         launchable_apps = req.get("launchable_apps") or []
         fixed_response = route_fixed_skill(

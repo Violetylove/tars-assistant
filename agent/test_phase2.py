@@ -608,9 +608,8 @@ def test_server_passes_foreground_context_to_decision_backend():
     assert captured["activity"] == "com.android.settings.Settings"
 
 
-def test_server_raw_ui_logging_is_opt_in(monkeypatch, caplog):
+def test_server_never_logs_raw_ui_xml(caplog):
     srv = _fresh_server()
-    monkeypatch.delenv("TARS_LOG_RAW_UI", raising=False)
     caplog.set_level(logging.INFO, logger="tars.server")
     request = {
         "protocol_version": "1.0", "session_id": "raw-ui-log", "intent": "测试",
@@ -618,12 +617,7 @@ def test_server_raw_ui_logging_is_opt_in(monkeypatch, caplog):
     }
     srv.agent_run(request)
     assert "raw ui enabled" not in caplog.text
-
-    caplog.clear()
-    monkeypatch.setenv("TARS_LOG_RAW_UI", "1")
-    srv.agent_run(request)
-    assert "raw ui enabled session=raw-ui-log" in caplog.text
-    assert "<hierarchy>" in caplog.text
+    assert SIMPLE_XML not in caplog.text
 
 
 def test_server_accepts_android_log_upload(tmp_path, monkeypatch):

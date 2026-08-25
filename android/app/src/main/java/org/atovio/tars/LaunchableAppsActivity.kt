@@ -36,13 +36,13 @@ class LaunchableAppsActivity : Activity() {
         actionRow.addView(button("刷新应用列表") { refreshApps() }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         actionRow.addView(button("保存允许启动的应用") { saveApps() }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(8) })
         content.addView(actionRow)
-        appsContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        content.addView(appsContainer)
         status = TextView(this).apply {
             setTextColor(Color.rgb(71, 85, 105))
-            setPadding(0, dp(8), 0, 0)
+            setPadding(0, dp(8), 0, dp(4))
         }
         content.addView(status)
+        appsContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        content.addView(appsContainer)
         val scrollView = ScrollView(this).apply {
             clipToPadding = false
             ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->

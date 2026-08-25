@@ -44,6 +44,7 @@ class MainActivity : Activity() {
     @Volatile private var activeAgentClient: AgentClient? = null
     @Volatile private var taskThread: Thread? = null
     @Volatile private var readinessCheckInFlight = false
+    @Volatile private var activeLogSessionId: String? = null
     private var lastReadinessSignature: String? = null
     private var blockedIntent: String? = null
     private val triggerReceiver = object : BroadcastReceiver() {
@@ -271,7 +272,9 @@ class MainActivity : Activity() {
             val service = TarsAccessibilityService.instance
                 ?: throw IllegalStateException("无障碍服务已断开，请重新连接后发送")
             val history = JSONArray()
-            val sessionId = java.util.UUID.randomUUID().toString()
+            val sessionId = newSessionId()
+            activeLogSessionId = sessionId
+            AndroidLogStore.append(this, "session=$sessionId task_started intent=${JSONObject.quote(taskIntent)}")
             var consecutiveNoChange = 0
             var noteForNextRound = ""
             for (round in 0 until runtime.maxObservationRounds) {
@@ -283,14 +286,27 @@ class MainActivity : Activity() {
                 val observationVersion = service.currentObservationVersion()
                 val foreground = service.currentAppPackage() ?: UNKNOWN_FOREGROUND
                 appendLog("第 ${round + 1} 轮，前台应用：$foreground")
+                AndroidLogStore.appendBlock(this, buildString {
+                    append("session=$sessionId round=${round + 1} capture app=")
+                    append(JSONObject.quote(foreground))
+                    append(" activity=")
+                    append(JSONObject.quote(service.currentActivity().orEmpty()))
+                    append(" xml_bytes=${uiXml.toByteArray(Charsets.UTF_8).size} ui_xml_begin\n")
+                    append(uiXml)
+                    append("\nui_xml_end")
+                })
                 val response = client.run(TaskRequest(
                     intent = taskIntent, app = service.currentAppPackage(), activity = service.currentActivity(), uiXml = uiXml,
                     sessionId = sessionId, history = history, observationNote = noteForNextRound.takeIf { it.isNotBlank() },
                     launchableApps = LaunchableApps.selectedInstalled(this),
                 ))
+                AndroidLogStore.append(
+                    this,
+                    "session=$sessionId round=${round + 1} agent_response done=${response.done} need_observation=${response.needObservation} reply=${JSONObject.quote(response.reply)} actions=${response.actions.toJsonArray()}",
+                )
                 noteForNextRound = ""
                 if (response.reply.isNotBlank()) appendLog(response.reply)
-                val execution = service.execute(response.actions, ::confirmAction)
+                val execution = service.execute(response.actions, ::confirmAction, sessionId)
                 execution.messages.forEach(::appendLog)
                 if (cancelRequested) {
                     finishCancelledTask()
@@ -351,6 +367,7 @@ class MainActivity : Activity() {
             activeAgentClient = null
             taskThread = null
             cancelRequested = false
+            activeLogSessionId = null
             runOnUiThread { send.isEnabled = true }
         }
     }
@@ -421,7 +438,8 @@ class MainActivity : Activity() {
             row.addView(bubble)
             timeline.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
             conversationScroll.post { conversationScroll.fullScroll(View.FOCUS_DOWN) }
-            AndroidLogStore.append(this, "${if (fromUser) "intent" else "timeline"}: $message")
+            val sessionPrefix = activeLogSessionId?.let { "session=$it " }.orEmpty()
+            AndroidLogStore.append(this, "$sessionPrefix${if (fromUser) "intent" else "timeline"}: $message")
         }
     }
 
@@ -592,6 +610,8 @@ class MainActivity : Activity() {
     }
 
     private fun setConnectionStatus(message: String) { if (::connectionStatus.isInitialized) connectionStatus.text = message }
+
+    private fun newSessionId(): String = java.util.UUID.randomUUID().toString().replace("-", "").take(16)
 
     private fun confirmAction(action: AgentAction): Boolean {
         val approved = BooleanArray(1)
