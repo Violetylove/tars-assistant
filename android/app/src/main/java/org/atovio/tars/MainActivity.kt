@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
@@ -37,10 +38,13 @@ class MainActivity : Activity() {
     private lateinit var voice: VoiceIntentCapture
     private val timelineEntries = mutableListOf<TimelineEntry>()
     @Volatile private var requestInFlight = false
+    @Volatile private var readinessCheckInFlight = false
+    private var lastReadinessSignature: String? = null
+    private var blockedIntent: String? = null
     private val triggerReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == TarsAccessibilityService.ACTION_CONNECTED) {
-                setConnectionStatus("无障碍服务已连接")
+                refreshReadiness()
             } else {
                 appendLog("收到待处理任务。可在设置页载入后检查并发送。")
             }
@@ -57,7 +61,7 @@ class MainActivity : Activity() {
         send.setOnClickListener { submitIntent() }
         val restoredEntries = savedInstanceState?.getStringArrayList(STATE_TIMELINE)
         if (restoredEntries.isNullOrEmpty()) {
-            appendLog("准备就绪。发送任务后，我会在这里记录前台状态与执行过程。")
+            refreshReadiness(forceAnnouncement = true)
         } else {
             restoredEntries.forEach { encoded ->
                 appendMessage(encoded.drop(2), encoded.startsWith("U:"))
@@ -82,7 +86,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (TarsAccessibilityService.instance != null && !requestInFlight) setConnectionStatus("无障碍服务已连接")
+        if (!requestInFlight) refreshReadiness()
     }
 
     override fun onDestroy() { voice.destroy(); executor.shutdownNow(); super.onDestroy() }
@@ -156,10 +160,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setTextColor(Color.rgb(71, 85, 105))
             setBackgroundColor(Color.TRANSPARENT)
-            setOnClickListener {
-                startActivityForResult(Intent(this@MainActivity, SettingsActivity::class.java)
-                    .putExtra(SettingsActivity.EXTRA_DRAFT_INTENT, intentInput.text.toString().trim()), SETTINGS_REQUEST_CODE)
-            }
+            setOnClickListener { openSettings() }
         }, LinearLayout.LayoutParams(dp(48), dp(48)))
     }
 
@@ -198,100 +199,279 @@ class MainActivity : Activity() {
     private fun submitIntent() {
         val taskIntent = intentInput.text.toString().trim()
         if (taskIntent.isEmpty()) { setConnectionStatus("请输入任务意图"); return }
-        appendUserMessage(taskIntent)
-        intentInput.setText("")
+        val issues = localReadinessIssues()
+        if (issues.isNotEmpty()) {
+            if (blockedIntent != taskIntent) appendUserMessage(taskIntent)
+            blockedIntent = taskIntent
+            reportReadinessIssues(issues, forceAnnouncement = true)
+            return
+        }
         send.isEnabled = false
         requestInFlight = true
-        setConnectionStatus("任务进行中")
-        appendLog("正在采集当前界面并请求 Agent 决策。")
-        val runtime = RuntimeSettings.read(this)
+        setConnectionStatus("正在检查 Agent 服务")
         executor.execute {
-            try {
-                val client = AgentClient(this)
-                val service = TarsAccessibilityService.instance
-                val history = JSONArray()
-                val sessionId = java.util.UUID.randomUUID().toString()
-                var reachedRoundLimit = true
-                var consecutiveNoChange = 0
-                var noteForNextRound = ""
-                for (round in 0 until runtime.maxObservationRounds) {
-                    val uiXml = service?.currentUiXml().orEmpty()
-                    val observationVersion = service?.currentObservationVersion() ?: 0L
-                    val foreground = service?.currentAppPackage() ?: UNKNOWN_FOREGROUND
-                    appendLog("第 ${round + 1} 轮，前台应用：$foreground")
-                    val response = client.run(TaskRequest(
-                        intent = taskIntent, app = service?.currentAppPackage(), activity = service?.currentActivity(), uiXml = uiXml,
-                        sessionId = sessionId, history = history, observationNote = noteForNextRound.takeIf { it.isNotBlank() },
-                        launchableApps = LaunchableApps.selectedInstalled(this),
-                    ))
-                    noteForNextRound = ""
-                    if (response.reply.isNotBlank()) appendLog(response.reply)
-                    val execution = service?.execute(response.actions, ::confirmAction)
-                        ?: ActionExecutor.ExecutionSummary(listOf("无障碍服务未连接"), completed = false)
-                    execution.messages.forEach(::appendLog)
-                    if (!execution.completed) {
-                        consecutiveNoChange++
-                        noteForNextRound = NO_CHANGE_NOTE
-                        appendLog("动作未生效，正在重新采集当前界面（连续无变化第 $consecutiveNoChange 次）。")
-                        if (consecutiveNoChange >= MAX_NO_CHANGE_ROUNDS) {
-                            appendLog("连续多次无变化，已停止任务。")
-                            reachedRoundLimit = false
-                            break
-                        }
-                        continue
-                    }
-                    history.put(JSONObject().put("actions", response.actions.toJsonArray()))
-                    if (response.done || !response.needObservation || response.actions.isEmpty()) {
+            val agentReady = try {
+                AgentClient(this).health()
+            } catch (_: Exception) {
+                false
+            }
+            if (!agentReady) {
+                requestInFlight = false
+                runOnUiThread {
+                    send.isEnabled = true
+                    reportReadinessIssues(listOf(agentUnavailableIssue()), forceAnnouncement = true)
+                }
+                return@execute
+            }
+            runOnUiThread {
+                if (blockedIntent != taskIntent) appendUserMessage(taskIntent)
+                blockedIntent = null
+                intentInput.setText("")
+                setConnectionStatus("任务进行中")
+                appendLog("正在采集当前界面并请求 Agent 决策。")
+            }
+            runTask(taskIntent)
+        }
+    }
+
+    private fun runTask(taskIntent: String) {
+        val runtime = RuntimeSettings.read(this)
+        var completedByAgent = false
+        var reachedRoundLimit = true
+        try {
+            val client = AgentClient(this)
+            val service = TarsAccessibilityService.instance
+                ?: throw IllegalStateException("无障碍服务已断开，请重新连接后发送")
+            val history = JSONArray()
+            val sessionId = java.util.UUID.randomUUID().toString()
+            var consecutiveNoChange = 0
+            var noteForNextRound = ""
+            for (round in 0 until runtime.maxObservationRounds) {
+                val uiXml = service.currentUiXml()
+                val observationVersion = service.currentObservationVersion()
+                val foreground = service.currentAppPackage() ?: UNKNOWN_FOREGROUND
+                appendLog("第 ${round + 1} 轮，前台应用：$foreground")
+                val response = client.run(TaskRequest(
+                    intent = taskIntent, app = service.currentAppPackage(), activity = service.currentActivity(), uiXml = uiXml,
+                    sessionId = sessionId, history = history, observationNote = noteForNextRound.takeIf { it.isNotBlank() },
+                    launchableApps = LaunchableApps.selectedInstalled(this),
+                ))
+                noteForNextRound = ""
+                if (response.reply.isNotBlank()) appendLog(response.reply)
+                val execution = service.execute(response.actions, ::confirmAction)
+                execution.messages.forEach(::appendLog)
+                if (!execution.completed) {
+                    consecutiveNoChange++
+                    noteForNextRound = NO_CHANGE_NOTE
+                    appendLog("动作未生效，正在重新采集当前界面（连续无变化第 $consecutiveNoChange 次）。")
+                    if (consecutiveNoChange >= MAX_NO_CHANGE_ROUNDS) {
+                        appendLog("连续多次无变化，已停止任务。")
                         reachedRoundLimit = false
                         break
                     }
-                    val pkgChanged = service != null && service.currentAppPackage() != null && service.currentAppPackage() != foreground
-                    if (service == null || (!service.awaitFreshUiAfter(uiXml, foreground, runtime.observationTimeoutMs, observationVersion) && !pkgChanged)) {
-                        consecutiveNoChange++
-                        noteForNextRound = NO_CHANGE_NOTE
-                        appendLog("未观察到界面更新，正在重新采集当前界面（连续无变化第 $consecutiveNoChange 次）。")
-                        if (consecutiveNoChange >= MAX_NO_CHANGE_ROUNDS) {
-                            appendLog("连续多次无变化，已停止任务。")
-                            reachedRoundLimit = false
-                            break
-                        }
-                        continue
-                    }
-                    consecutiveNoChange = 0
-                    appendLog("界面已更新，进入下一轮（前台：${service.currentAppPackage() ?: UNKNOWN_FOREGROUND}）。")
+                    continue
                 }
-                if (reachedRoundLimit) appendLog("已达到最大观察轮数，已停止任务。")
-                runOnUiThread { setConnectionStatus("任务已结束") }
-            } catch (e: Exception) {
-                appendLog("请求失败：${e.message}")
-                runOnUiThread { setConnectionStatus("任务失败") }
-            } finally {
-                requestInFlight = false
-                runOnUiThread { send.isEnabled = true }
+                history.put(JSONObject().put("actions", response.actions.toJsonArray()))
+                if (response.done) {
+                    completedByAgent = true
+                    reachedRoundLimit = false
+                    appendLog("任务完成。")
+                    break
+                }
+                if (!response.needObservation || response.actions.isEmpty()) {
+                    reachedRoundLimit = false
+                    break
+                }
+                val pkgChanged = service.currentAppPackage() != null && service.currentAppPackage() != foreground
+                if (!service.awaitFreshUiAfter(uiXml, foreground, runtime.observationTimeoutMs, observationVersion) && !pkgChanged) {
+                    consecutiveNoChange++
+                    noteForNextRound = NO_CHANGE_NOTE
+                    appendLog("未观察到界面更新，正在重新采集当前界面（连续无变化第 $consecutiveNoChange 次）。")
+                    if (consecutiveNoChange >= MAX_NO_CHANGE_ROUNDS) {
+                        appendLog("连续多次无变化，已停止任务。")
+                        reachedRoundLimit = false
+                        break
+                    }
+                    continue
+                }
+                consecutiveNoChange = 0
+                appendLog("界面已更新，进入下一轮（前台：${service.currentAppPackage() ?: UNKNOWN_FOREGROUND}）。")
             }
+            if (reachedRoundLimit) appendLog("已达到最大观察轮数，已停止任务。")
+            runOnUiThread { setConnectionStatus(if (completedByAgent) "任务完成" else "任务已结束") }
+        } catch (e: Exception) {
+            appendLog("请求失败：${e.message}")
+            runOnUiThread { setConnectionStatus("任务失败") }
+        } finally {
+            requestInFlight = false
+            runOnUiThread { send.isEnabled = true }
         }
     }
 
     private fun appendUserMessage(message: String) = appendMessage(message, true)
     private fun appendLog(message: String) = appendMessage(message, false)
+
+    private fun appendLogWithLink(message: String, linkLabel: String, action: () -> Unit) {
+        runOnUiThread {
+            timelineEntries += TimelineEntry(message, false)
+            val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            val bubbleRow = LinearLayout(this).apply { gravity = Gravity.START }
+            bubbleRow.addView(logBubble(message))
+            container.addView(bubbleRow)
+            container.addView(TextView(this).apply {
+                text = linkLabel
+                textSize = 14f
+                setTextColor(Color.rgb(37, 99, 235))
+                paintFlags = paintFlags or Paint.UNDERLINE_TEXT_FLAG
+                contentDescription = linkLabel
+                setPadding(dp(14), dp(8), dp(14), dp(2))
+                setOnClickListener { action() }
+            })
+            timeline.addView(container, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { bottomMargin = dp(8) })
+            conversationScroll.post { conversationScroll.fullScroll(View.FOCUS_DOWN) }
+        }
+    }
+
     private fun appendMessage(message: String, fromUser: Boolean) {
         runOnUiThread {
             timelineEntries += TimelineEntry(message, fromUser)
             val row = LinearLayout(this).apply { gravity = if (fromUser) Gravity.END else Gravity.START }
-            val bubble = TextView(this).apply {
-                text = message
-                textSize = 15f
-                setTextColor(if (fromUser) Color.WHITE else Color.rgb(30, 41, 59))
-                setPadding(dp(14), dp(10), dp(14), dp(10))
-                maxWidth = (resources.displayMetrics.widthPixels * 0.82f).toInt()
-                background = roundedBackground(
-                    if (fromUser) Color.rgb(37, 99, 235) else Color.WHITE,
-                    if (fromUser) Color.rgb(37, 99, 235) else Color.rgb(226, 232, 240), 14,
-                )
-            }
+            val bubble = if (fromUser) userBubble(message) else logBubble(message)
             row.addView(bubble)
             timeline.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
             conversationScroll.post { conversationScroll.fullScroll(View.FOCUS_DOWN) }
+        }
+    }
+
+    private fun userBubble(message: String): TextView = messageBubble(
+        message,
+        Color.WHITE,
+        Color.rgb(37, 99, 235),
+        Color.rgb(37, 99, 235),
+    )
+
+    private fun logBubble(message: String): TextView = messageBubble(
+        message,
+        Color.rgb(30, 41, 59),
+        Color.WHITE,
+        Color.rgb(226, 232, 240),
+    )
+
+    private fun messageBubble(message: String, textColor: Int, fill: Int, stroke: Int): TextView = TextView(this).apply {
+        text = message
+        textSize = 15f
+        setTextColor(textColor)
+        setPadding(dp(14), dp(10), dp(14), dp(10))
+        maxWidth = (resources.displayMetrics.widthPixels * 0.82f).toInt()
+        background = roundedBackground(fill, stroke, 14)
+    }
+
+    private fun refreshReadiness(forceAnnouncement: Boolean = false) {
+        if (requestInFlight) return
+        val localIssues = localReadinessIssues()
+        if (localIssues.isNotEmpty()) {
+            reportReadinessIssues(localIssues, forceAnnouncement)
+            return
+        }
+        if (readinessCheckInFlight) return
+        readinessCheckInFlight = true
+        setConnectionStatus("正在检查 Agent 服务")
+        executor.execute {
+            val agentReady = try {
+                AgentClient(this).health()
+            } catch (_: Exception) {
+                false
+            }
+            readinessCheckInFlight = false
+            runOnUiThread {
+                if (requestInFlight) return@runOnUiThread
+                val changedIssues = localReadinessIssues()
+                when {
+                    changedIssues.isNotEmpty() -> reportReadinessIssues(changedIssues, forceAnnouncement)
+                    agentReady -> reportReady(forceAnnouncement)
+                    else -> reportReadinessIssues(listOf(agentUnavailableIssue()), forceAnnouncement)
+                }
+            }
+        }
+    }
+
+    private fun localReadinessIssues(): List<ReadinessIssue> {
+        val issues = mutableListOf<ReadinessIssue>()
+        if (TarsAccessibilityService.instance == null) {
+            issues += ReadinessIssue(
+                key = "accessibility",
+                message = "无障碍服务未开启，TARS 无法读取和操作当前界面。",
+                linkLabel = "打开无障碍设置",
+                action = { startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
+            )
+        }
+        when (ShizukuGateway().connectionState()) {
+            ShizukuGateway.ConnectionState.SERVICE_UNAVAILABLE -> issues += ReadinessIssue(
+                key = "shizuku-service",
+                message = "Shizuku 服务未启动或当前版本不可用。",
+                linkLabel = "前往 Shizuku 设置",
+                action = ::openSettings,
+            )
+            ShizukuGateway.ConnectionState.AUTHORIZATION_REQUIRED -> issues += ReadinessIssue(
+                key = "shizuku-permission",
+                message = "Shizuku 尚未授权给 TARS。",
+                linkLabel = "连接 Shizuku",
+                action = ::requestShizukuConnection,
+            )
+            ShizukuGateway.ConnectionState.READY -> Unit
+        }
+        return issues
+    }
+
+    private fun agentUnavailableIssue(): ReadinessIssue = ReadinessIssue(
+        key = "agent",
+        message = "Agent 服务不可连接，请检查主机地址、端口和服务运行状态。",
+        linkLabel = "打开 Agent 设置",
+        action = ::openSettings,
+    )
+
+    private fun reportReadinessIssues(issues: List<ReadinessIssue>, forceAnnouncement: Boolean) {
+        val signature = issues.joinToString(separator = "|") { it.key }
+        setConnectionStatus("需要完成 ${issues.size} 项连接")
+        if (forceAnnouncement || signature != lastReadinessSignature) {
+            issues.forEach { issue -> appendLogWithLink(issue.message, issue.linkLabel, issue.action) }
+        }
+        lastReadinessSignature = signature
+    }
+
+    private fun reportReady(forceAnnouncement: Boolean) {
+        setConnectionStatus("准备就绪")
+        if (forceAnnouncement || lastReadinessSignature != READY_SIGNATURE) {
+            appendLog("准备就绪。发送任务后，我会在这里记录前台状态与执行过程。")
+        }
+        lastReadinessSignature = READY_SIGNATURE
+    }
+
+    private fun openSettings() {
+        startActivityForResult(
+            Intent(this, SettingsActivity::class.java)
+                .putExtra(SettingsActivity.EXTRA_DRAFT_INTENT, intentInput.text.toString().trim()),
+            SETTINGS_REQUEST_CODE,
+        )
+    }
+
+    private fun requestShizukuConnection() {
+        when (ShizukuGateway().requestPermission(SHIZUKU_REQUEST_CODE)) {
+            ShizukuGateway.PermissionRequestResult.GRANTED -> refreshReadiness(forceAnnouncement = true)
+            ShizukuGateway.PermissionRequestResult.REQUESTED -> setConnectionStatus("请在 Shizuku 中确认授权")
+            ShizukuGateway.PermissionRequestResult.RATIONALE_REQUIRED -> appendLogWithLink(
+                "Shizuku 授权此前被拒绝，请在设置页中重新授权。",
+                "前往 Shizuku 设置",
+                ::openSettings,
+            )
+            ShizukuGateway.PermissionRequestResult.UNAVAILABLE -> appendLogWithLink(
+                "Shizuku 服务不可用，请先在管理器中启动。",
+                "前往 Shizuku 设置",
+                ::openSettings,
+            )
         }
     }
 
@@ -329,9 +509,18 @@ class MainActivity : Activity() {
         private const val UNKNOWN_FOREGROUND = "未知"
         private const val NO_CHANGE_NOTE = "上一轮动作未使界面发生变化（目标可能被遮挡、已出视口或不可达）。当前界面见本次新采集；请重新观察，选择其他能推进目标的动作。"
         private const val MICROPHONE_PERMISSION_REQUEST_CODE = 1003
+        private const val SHIZUKU_REQUEST_CODE = 1001
         private const val SETTINGS_REQUEST_CODE = 2001
         private const val STATE_TIMELINE = "timeline"
+        private const val READY_SIGNATURE = "ready"
     }
+
+    private data class ReadinessIssue(
+        val key: String,
+        val message: String,
+        val linkLabel: String,
+        val action: () -> Unit,
+    )
 
     private data class TimelineEntry(val message: String, val fromUser: Boolean)
 }

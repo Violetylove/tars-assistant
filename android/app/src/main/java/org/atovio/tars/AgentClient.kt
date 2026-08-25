@@ -18,7 +18,7 @@ class AgentClient(context: android.content.Context) {
         }
     }
 
-    fun health(): Boolean = request("GET", "/health", null).first == 200
+    fun health(): Boolean = request("GET", "/health", null, HEALTH_TIMEOUT_MS).first == 200
 
     fun run(request: TaskRequest): AgentResponse {
         val (status, body) = request("POST", "/agent/run", request.toJson())
@@ -28,13 +28,18 @@ class AgentClient(context: android.content.Context) {
         }
     }
 
-    private fun request(method: String, path: String, payload: JSONObject?): Pair<Int, String> {
+    private fun request(
+        method: String,
+        path: String,
+        payload: JSONObject?,
+        timeoutMs: Int = settings.modelRequestTimeoutMs,
+    ): Pair<Int, String> {
         val url = URL(baseUrl.trimEnd('/') + path)
         // Loopback must stay direct; a configured remote Agent follows the device network path.
         val conn = ((if (isLoopback) url.openConnection(Proxy.NO_PROXY) else url.openConnection()) as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = 5_000
-            readTimeout = settings.modelRequestTimeoutMs
+            readTimeout = timeoutMs
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
             doInput = true
             if (payload != null) {
@@ -47,5 +52,9 @@ class AgentClient(context: android.content.Context) {
             val stream = if (status >= 400) conn.errorStream else conn.inputStream
             status to (stream?.bufferedReader()?.use { it.readText() } ?: "")
         } finally { conn.disconnect() }
+    }
+
+    private companion object {
+        const val HEALTH_TIMEOUT_MS = 5_000
     }
 }

@@ -9,6 +9,12 @@ import rikka.shizuku.Shizuku
 
 /** High-privilege bridge backed by Shizuku's official UserService API. */
 class ShizukuGateway {
+    enum class ConnectionState {
+        READY,
+        SERVICE_UNAVAILABLE,
+        AUTHORIZATION_REQUIRED,
+    }
+
     enum class PermissionRequestResult {
         GRANTED,
         REQUESTED,
@@ -31,10 +37,16 @@ class ShizukuGateway {
         }
     }
 
-    fun isAvailable(): Boolean = try {
-        Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+    fun isAvailable(): Boolean = connectionState() == ConnectionState.READY
+
+    fun connectionState(): ConnectionState = try {
+        when {
+            !Shizuku.pingBinder() || Shizuku.isPreV11() -> ConnectionState.SERVICE_UNAVAILABLE
+            Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED -> ConnectionState.AUTHORIZATION_REQUIRED
+            else -> ConnectionState.READY
+        }
     } catch (_: Throwable) {
-        false
+        ConnectionState.SERVICE_UNAVAILABLE
     }
 
     fun requestPermission(requestCode: Int): PermissionRequestResult {
