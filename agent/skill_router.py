@@ -28,7 +28,7 @@ def _response(session_id: str, reply: str, actions: list[dict], *, done: bool, o
     }
 
 
-def route_fixed_skill(*, session_id: str, intent: str) -> Optional[dict]:
+def route_fixed_skill(*, session_id: str, intent: str, launchable_apps: Optional[list[dict]] = None) -> Optional[dict]:
     """Return an allow-listed response for an exact open-app request, else None."""
     normalized = " ".join(intent.casefold().strip().split())
     if not (normalized.startswith("打开") or normalized.startswith("open ")):
@@ -38,4 +38,7 @@ def route_fixed_skill(*, session_id: str, intent: str) -> Optional[dict]:
     if skill is None:
         return None
     package_name, reply = skill
-    return _response(session_id, reply, [{"type": "launch", "package_name": package_name}], done=True, observe=False)
+    allowed_packages = {entry.get("package_name") for entry in launchable_apps or []}
+    if package_name not in allowed_packages:
+        return None
+    return _response(session_id, reply, [{"type": "launch", "package_name": package_name}], done=False, observe=True)

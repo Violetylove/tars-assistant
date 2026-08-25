@@ -111,12 +111,19 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.rgb(248, 250, 252))
             ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
                 val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                val bottomInset = maxOf(
+                    systemBars.bottom,
+                    insets.getInsets(WindowInsetsCompat.Type.ime()).bottom,
+                )
                 view.setPadding(
                     systemBars.left,
                     systemBars.top,
                     systemBars.right,
-                    systemBars.bottom,
+                    bottomInset,
                 )
+                if (insets.isVisible(WindowInsetsCompat.Type.ime()) && ::conversationScroll.isInitialized) {
+                    conversationScroll.post { conversationScroll.fullScroll(View.FOCUS_DOWN) }
+                }
                 insets
             }
         }
@@ -215,6 +222,7 @@ class MainActivity : Activity() {
                     val response = client.run(TaskRequest(
                         intent = taskIntent, app = service?.currentAppPackage(), activity = service?.currentActivity(), uiXml = uiXml,
                         sessionId = sessionId, history = history, observationNote = noteForNextRound.takeIf { it.isNotBlank() },
+                        launchableApps = LaunchableApps.selectedInstalled(this),
                     ))
                     noteForNextRound = ""
                     if (response.reply.isNotBlank()) appendLog(response.reply)

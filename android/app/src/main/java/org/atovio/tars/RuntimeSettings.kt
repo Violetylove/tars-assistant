@@ -13,6 +13,7 @@ object RuntimeSettings {
     private const val KEY_MODEL_TIMEOUT = "model_request_timeout_ms"
     private const val KEY_REMINDER_DELAY = "manual_reminder_delay_ms"
     private const val KEY_NEW_APP_GRACE = "new_app_grace_ms"
+    private const val KEY_ALLOWED_LAUNCH_PACKAGES = "allowed_launch_packages"
 
     data class Values(
         val maxObservationRounds: Int = DEFAULT_MAX_OBSERVATION_ROUNDS,
@@ -56,6 +57,18 @@ object RuntimeSettings {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
     }
 
+    fun allowedLaunchPackages(context: Context): Set<String> =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getStringSet(KEY_ALLOWED_LAUNCH_PACKAGES, emptySet())
+            ?.toSet()
+            .orEmpty()
+
+    fun saveAllowedLaunchPackages(context: Context, packageNames: Set<String>) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putStringSet(KEY_ALLOWED_LAUNCH_PACKAGES, packageNames)
+            .apply()
+    }
+
     private fun validate(values: Values): String? = when {
         values.maxObservationRounds !in 1..20 -> "观察轮数必须在 1 到 20 之间"
         values.observationTimeoutMs !in 2_000L..10_000L -> "界面观察超时必须在 2000 到 10000 毫秒之间"
@@ -95,5 +108,6 @@ object RuntimeSettings {
     const val DEFAULT_MODEL_REQUEST_TIMEOUT_MS = 210_000
     const val DEFAULT_MANUAL_REMINDER_DELAY_MS = 15 * 60 * 1000L
     const val DEFAULT_NEW_APP_GRACE_MS = 4_000L
+    const val MAX_ALLOWED_LAUNCH_PACKAGES = 50
     val LOOPBACK_HOSTS = setOf("127.0.0.1", "::1", "[::1]")
 }

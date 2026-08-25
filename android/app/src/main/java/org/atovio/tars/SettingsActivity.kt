@@ -11,6 +11,7 @@ import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -28,6 +29,8 @@ class SettingsActivity : Activity() {
     private lateinit var modelTimeout: EditText
     private lateinit var reminderDelay: EditText
     private lateinit var newAppGrace: EditText
+    private lateinit var launchableAppsContainer: LinearLayout
+    private val launchAppChecks = linkedMapOf<String, CheckBox>()
     private val draftIntent: String by lazy { intent.getStringExtra(EXTRA_DRAFT_INTENT).orEmpty() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -62,8 +65,16 @@ class SettingsActivity : Activity() {
         content.addView(button("恢复安全默认值") {
             RuntimeSettings.restoreDefaults(this)
             populateSettings()
+            refreshLaunchableApps()
             showStatus("已恢复安全默认值")
         })
+
+        content.addView(sectionTitle("允许启动的应用"))
+        content.addView(button("刷新应用列表") { refreshLaunchableApps() })
+        launchableAppsContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        content.addView(launchableAppsContainer)
+        content.addView(button("保存允许启动的应用") { saveLaunchableApps() })
+
         status = TextView(this).apply {
             setTextColor(Color.rgb(71, 85, 105))
             setPadding(0, dp(12), 0, 0)
@@ -86,6 +97,7 @@ class SettingsActivity : Activity() {
         setContentView(scrollView)
         ViewCompat.requestApplyInsets(scrollView)
         populateSettings()
+        refreshLaunchableApps()
         refreshServiceState()
     }
 
@@ -162,6 +174,57 @@ class SettingsActivity : Activity() {
         )
         RuntimeSettings.save(this, values)?.let { showStatus(it); return }
         showStatus("运行参数已保存，下次任务立即生效")
+    }
+
+    private fun refreshLaunchableApps() {
+        val apps = LaunchableApps.installed(this)
+        val installedPackages = apps.mapTo(mutableSetOf()) { it.packageName }
+        val saved = RuntimeSettings.allowedLaunchPackages(this)
+        val missing = saved - installedPackages
+        val selected = saved - missing
+        if (missing.isNotEmpty()) RuntimeSettings.saveAllowedLaunchPackages(this, selected)
+
+        launchAppChecks.clear()
+        launchableAppsContainer.removeAllViews()
+        if (apps.isEmpty()) {
+            launchableAppsContainer.addView(TextView(this).apply {
+                text = "未找到可启动的应用"
+                setTextColor(Color.rgb(71, 85, 105))
+                setPadding(0, dp(8), 0, dp(8))
+            })
+        } else {
+            apps.forEach { app ->
+                val check = CheckBox(this).apply {
+                    text = "${app.label}\n${app.packageName}"
+                    textSize = 15f
+                    setPadding(0, dp(4), 0, dp(4))
+                    isChecked = app.packageName in selected
+                }
+                launchAppChecks[app.packageName] = check
+                launchableAppsContainer.addView(check)
+            }
+        }
+        showStatus(
+            if (missing.isEmpty()) "已刷新应用列表，共 ${apps.size} 个可启动应用"
+            else "已移除已卸载的应用：${missing.joinToString("、")}",
+        )
+    }
+
+    private fun saveLaunchableApps() {
+        val selected = launchAppChecks.filterValues { it.isChecked }.keys
+        val installed = LaunchableApps.installed(this).mapTo(mutableSetOf()) { it.packageName }
+        val missing = selected - installed
+        val valid = selected - missing
+        if (valid.size > RuntimeSettings.MAX_ALLOWED_LAUNCH_PACKAGES) {
+            showStatus("最多可保存 ${RuntimeSettings.MAX_ALLOWED_LAUNCH_PACKAGES} 个允许启动的应用")
+            return
+        }
+        RuntimeSettings.saveAllowedLaunchPackages(this, valid)
+        refreshLaunchableApps()
+        showStatus(
+            if (missing.isEmpty()) "已保存 ${valid.size} 个允许启动的应用"
+            else "以下应用已卸载，未保存：${missing.joinToString("、")}",
+        )
     }
 
     private fun requestShizukuPermission() {

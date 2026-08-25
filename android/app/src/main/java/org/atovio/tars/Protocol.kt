@@ -4,6 +4,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
+data class LaunchableApp(
+    val label: String,
+    val packageName: String,
+)
+
 data class TaskRequest(
     val intent: String,
     val app: String? = null,
@@ -12,6 +17,7 @@ data class TaskRequest(
     val sessionId: String = UUID.randomUUID().toString(),
     val history: JSONArray = JSONArray(),
     val observationNote: String? = null,
+    val launchableApps: List<LaunchableApp> = emptyList(),
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("protocol_version", "1.0")
@@ -22,6 +28,11 @@ data class TaskRequest(
         uiXml?.let { put("ui_xml", it) }
         observationNote?.takeIf { it.isNotBlank() }?.let { put("observation_note", it) }
         put("history", history)
+        put("launchable_apps", JSONArray().apply {
+            launchableApps.forEach { app ->
+                put(JSONObject().put("label", app.label).put("package_name", app.packageName))
+            }
+        })
     }
 }
 

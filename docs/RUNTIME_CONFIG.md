@@ -26,6 +26,7 @@
 | `model_request_timeout_ms` | `210000` | `RuntimeSettings.kt` / `AgentClient.kt` | 已在设置页开放；仅允许 60000–600000，覆盖云端推理与重试预算 |
 | `manual_reminder_delay_ms` | `900_000`（15 分钟） | `RuntimeSettings.kt` / `SettingsActivity.kt` | 已在设置页开放；仅允许 1 分钟到 7 天 |
 | `new_app_grace_ms` | `4000` | `RuntimeSettings.kt` / `TarsAccessibilityService.kt` | 已在设置页开放；仅允许 0–10000，新应用冷启动时为空树的额外等待宽限 |
+| `allowed_launch_packages` | 空 | `RuntimeSettings.kt` / `SettingsActivity.kt` | 已在设置页开放；仅保存用户勾选的可启动应用包名。保存和刷新时均重新检查安装状态，已卸载项会移除并提示 |
 
 ## B 类 — 安全白名单（不开放）
 
@@ -34,7 +35,6 @@
 | 参数 | 当前值 | 代码归属 | 说明 |
 |---|---|---|---|
 | 允许的 action 类型 | `click,type,swipe,back,home,launch,wait,reply,done` | `ActionExecutor.kt` `ALLOWED` / `bridge/schemas.py` `ACTION_TYPES` | 动作白名单，两处必须一致 |
-| 可启动包名白名单 | 系统设置、TARS、Gmail、微信 | `ActionExecutor.kt` `LAUNCHABLE_PACKAGES` / `skill_router.py` `_LAUNCH_SKILLS` | `launch` 仅能启动这些包；不开放 |
 | 敏感标签 | `发送,删除,清除,支付,付款,转账,send,delete,pay` | `ActionExecutor.kt` `SENSITIVE_LABELS` / `agent_loop.py` `_SENSITIVE_LABELS` | 触发强制二次确认；**不可放宽**，必要时只能加严 |
 | history 轮数上限 | `7` | `bridge/schemas.py` | 每任务最多回传 7 轮历史 |
 | 单轮动作数量上限 | `8` | `bridge/schemas.py` | 单次 `agent_response.actions` 与单轮 history 均 ≤ 8 |

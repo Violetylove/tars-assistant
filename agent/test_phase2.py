@@ -184,6 +184,15 @@ def test_decision_prompt_includes_previous_nodes():
     assert message.index("上一轮屏幕节点") < message.index("当前屏幕节点")
 
 
+def test_decision_prompt_includes_user_selected_launchable_apps():
+    message = _build_user_message(
+        "打开 Gmail", summarize_xml(SIMPLE_XML), [],
+        launchable_apps=[{"label": "Gmail", "package_name": "com.google.android.gm"}],
+    )
+    assert "允许启动的应用" in message
+    assert "Gmail | com.google.android.gm" in message
+
+
 def test_interactive_state_and_bounds_merged_into_prompt_line():
     xml = (
         '<hierarchy><window layer="0"><node package="com.google.android.gm" '
@@ -363,6 +372,23 @@ def test_decide_once_rejects_bad_action():
     assert ("校验" in resp["reply"]) or ("拒绝" in resp["reply"])
 
 
+def test_decide_once_rejects_launch_outside_user_selected_catalog():
+    llm = MockLLM(script=[lambda: json.dumps({"type": "launch", "package_name": "com.example.unapproved"})])
+    resp = decide_once(llm=llm, session_id="s1", intent="打开未知应用", ui_xml=SIMPLE_XML, max_retries=0)
+    assert resp["actions"] == []
+    assert "未获用户授权" in resp["reply"]
+
+
+def test_decide_once_launch_requires_a_followup_observation():
+    llm = MockLLM(script=[lambda: json.dumps({"type": "launch", "package_name": "com.google.android.gm"})])
+    resp = decide_once(
+        llm=llm, session_id="s1", intent="打开 Gmail", ui_xml=SIMPLE_XML,
+        launchable_apps=[{"label": "Gmail", "package_name": "com.google.android.gm"}],
+    )
+    assert resp["done"] is False
+    assert resp["need_observation"] is True
+
+
 def test_run_decision_loop_terminates_on_done():
     llm = MockLLM(script=[lambda: json.dumps({"type": "done"})])
     resp = run_decision_loop(llm=llm, session_id="s1", intent="完成", ui_xml=SIMPLE_XML)
@@ -501,6 +527,35 @@ def test_server_passes_foreground_context_to_decision_backend():
     assert captured["activity"] == "com.android.settings.Settings"
 
 
+def test_server_passes_launchable_apps_to_decision_backend():
+    srv = _fresh_server()
+    captured = {}
+    srv.decision_fn = lambda **kwargs: captured.update(kwargs) or {
+        "protocol_version": "1.0", "session_id": kwargs["session_id"], "done": True,
+        "reply": "OK", "actions": [], "need_observation": False,
+    }
+    srv.agent_run({
+        "protocol_version": "1.0", "session_id": "launchable-context", "intent": "在 Gmail 撰写草稿",
+        "launchable_apps": [{"label": "Gmail", "package_name": "com.google.android.gm"}],
+    })
+    assert captured["launchable_apps"] == [{"label": "Gmail", "package_name": "com.google.android.gm"}]
+
+
+def test_server_keeps_previous_nodes_when_current_ui_is_empty():
+    srv = _fresh_server()
+    previous = []
+    srv.decision_fn = lambda **kwargs: previous.append(kwargs["previous_nodes"]) or {
+        "protocol_version": "1.0", "session_id": kwargs["session_id"], "done": True,
+        "reply": "OK", "actions": [], "need_observation": False,
+    }
+    req = {"protocol_version": "1.0", "session_id": "keep-ui-cache", "intent": "测试"}
+    srv.agent_run({**req, "ui_xml": SIMPLE_XML})
+    cached = srv._prev_nodes["keep-ui-cache"]
+    srv.agent_run(req)
+    assert previous == ["", cached]
+    assert srv._prev_nodes["keep-ui-cache"] == cached
+
+
 def test_server_configure_mock_runtime_runs_a_valid_response():
     srv = _fresh_server()
     srv.configure_runtime(mock=True)
@@ -546,8 +601,10 @@ def test_server_routes_allowlisted_open_app_skill_without_model():
         "protocol_version": "1.0",
         "session_id": "open-settings",
         "intent": "打开设置",
+        "launchable_apps": [{"label": "设置", "package_name": "com.android.settings"}],
     })
-    assert response["done"] is True
+    assert response["done"] is False
+    assert response["need_observation"] is True
     assert response["actions"] == [{"type": "launch", "package_name": "com.android.settings"}]
 
 
@@ -557,8 +614,10 @@ def test_server_routes_english_open_settings_skill_without_model():
         "protocol_version": "1.0",
         "session_id": "open-settings-en",
         "intent": "open settings",
+        "launchable_apps": [{"label": "Settings", "package_name": "com.android.settings"}],
     })
-    assert response["done"] is True
+    assert response["done"] is False
+    assert response["need_observation"] is True
     assert response["actions"] == [{"type": "launch", "package_name": "com.android.settings"}]
 
 
@@ -568,8 +627,10 @@ def test_server_routes_open_gmail_skill_without_model():
         "protocol_version": "1.0",
         "session_id": "open-gmail",
         "intent": "open gmail",
+        "launchable_apps": [{"label": "Gmail", "package_name": "com.google.android.gm"}],
     })
-    assert response["done"] is True
+    assert response["done"] is False
+    assert response["need_observation"] is True
     assert response["actions"] == [{"type": "launch", "package_name": "com.google.android.gm"}]
 
 
@@ -579,8 +640,10 @@ def test_server_routes_open_tars_skill_to_current_application_id():
         "protocol_version": "1.0",
         "session_id": "open-tars",
         "intent": "open tars",
+        "launchable_apps": [{"label": "TARS", "package_name": "org.atovio.tars"}],
     })
-    assert response["done"] is True
+    assert response["done"] is False
+    assert response["need_observation"] is True
     assert response["actions"] == [{"type": "launch", "package_name": "org.atovio.tars"}]
 
 

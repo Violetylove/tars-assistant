@@ -122,6 +122,15 @@ _COMMON_DEFS = {
         "required": ["actions"],
         "additionalProperties": False,
     },
+    "launchable_app": {
+        "type": "object",
+        "properties": {
+            "label": {"type": "string", "minLength": 1, "maxLength": 100},
+            "package_name": {"type": "string", "minLength": 1, "maxLength": 200},
+        },
+        "required": ["label", "package_name"],
+        "additionalProperties": False,
+    },
 }
 
 
@@ -152,6 +161,11 @@ SCHEMAS = {
                 "type": "array",
                 "items": _ref("history_entry"),
                 "maxItems": 7,
+            },
+            "launchable_apps": {
+                "type": "array",
+                "items": _ref("launchable_app"),
+                "maxItems": 50,
             },
         },
         "required": [

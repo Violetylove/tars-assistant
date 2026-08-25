@@ -10,7 +10,7 @@ TARS 采用事件驱动链路：Android 原生 App 触发并执行，Termux 中�
 ```text
 Android App (Kotlin)
   触发 / 无障碍采集 / 动作执行
-             │ HTTP Agent endpoint (default 127.0.0.1:8080)
+             │ HTTP Agent endpoint (server default 0.0.0.0:8080)
 Termux Agent (Python/FastAPI)
   摘要 UI / Agent 循环 / schema 校验 / 固定技能
              │ HTTPS
@@ -43,7 +43,7 @@ Agent 无状态；`session_id` 由 App 生成并在每轮回传。
 
 ## 3. HTTP 协议
 
-协议版本：`1.0`。通信仅使用 JSON over HTTP。Android 默认连接 `127.0.0.1:8080`，也可在设置页配置有效的 IPv4、IPv6 或域名与端口；loopback 请求绕过系统代理，远程请求使用设备网络路径。远程 Agent 会接收任务文本与压缩 UI 摘要，必须部署在受信任网络中。
+协议版本：`1.0`。通信仅使用 JSON over HTTP。Agent 服务默认监听 `0.0.0.0:8080`，可通过 `--host`、`--port` 覆盖；Android 默认连接 `127.0.0.1:8080`，也可在设置页配置有效的 IPv4、IPv6 或域名与端口。`0.0.0.0` 仅是服务监听地址，客户端必须填写实际可达的主机地址。loopback 请求绕过系统代理，远程请求使用设备网络路径。远程 Agent 会接收任务文本与压缩 UI 摘要，必须部署在受信任网络中。
 
 端点：
 
@@ -62,12 +62,13 @@ Agent 无状态；`session_id` 由 App 生成并在每轮回传。
   "app": "com.android.settings",
   "activity": "...",
   "ui_xml": "<node ... />",
+  "launchable_apps": [{"label": "Gmail", "package_name": "com.google.android.gm"}],
   "observation_note": "上一轮动作未使界面发生变化…",
   "history": []
 }
 ```
 
-`protocol_version`、`session_id`、`intent` 必填；`app`、`activity`、`ui_xml`、`observation_note`、`history` 可选。`ui_xml` 缺失按空节点处理，非法非空 XML 拒绝。`observation_note` 是执行侧在「上一轮动作未产生界面变化」后重采界面时捎带的反馈（最多 500 字），Agent 会将其注入模型提示词，提示模型不要重复一个对未变化界面无效的动作；`history` 最多 7 轮，每轮最多 8 个合法动作。
+`protocol_version`、`session_id`、`intent` 必填；`app`、`activity`、`ui_xml`、`launchable_apps`、`observation_note`、`history` 可选。`launchable_apps` 最多 50 项，设置页会阻止超出此上限的保存；每项是 Android 本机实时枚举、且由用户勾选的 `{label, package_name}`，它是模型和 Agent 唯一允许使用的 `launch` 包名目录。`ui_xml` 缺失按空节点处理，非法非空 XML 拒绝。`observation_note` 是执行侧在「上一轮动作未产生界面变化」后重采界面时捎带的反馈（最多 500 字），Agent 会将其注入模型提示词，提示模型不要重复一个对未变化界面无效的动作；`history` 最多 7 轮，每轮最多 8 个合法动作。
 
 ### 3.2 `agent_response`
 
@@ -92,7 +93,7 @@ Agent 无状态；`session_id` 由 App 生成并在每轮回传。
 | `type` | `target_node_id`, `text` | 无障碍输入，失败时受限 Shizuku 回退 |
 | `swipe` | `x1,y1,x2,y2,duration_ms` | 受限 Shizuku |
 | `back` / `home` | 无 | 无障碍全局动作 |
-| `launch` | `package_name` | 固定包名白名单启动 |
+| `launch` | `package_name` | 仅启动本轮 `launchable_apps` 中的用户勾选包名；随后重新采集 UI |
 | `wait` | `ms` | 等待 |
 | `reply` | `text` | 文本响应 |
 | `done` | 无 | 结束 |
@@ -112,7 +113,7 @@ Android 使用 `AccessibilityNodeInfo` 遍历并序列化 UI XML；`uiautomator 
 ## 5. 安全边界
 
 1. **协议校验**：Agent 和 Android 均校验 schema、`protocol_version`、`session_id`、历史长度和动作数量。
-2. **动作白名单**：只允许 `click/type/swipe/back/home/launch/wait/reply/done`；`launch` 仅允许系统设置、TARS、Gmail、微信，禁止任意 Intent、组件、URI 和 shell 参数。
+2. **动作白名单**：只允许 `click/type/swipe/back/home/launch/wait/reply/done`；`launch` 仅允许本机仍安装、用户在设置页勾选且随本轮请求携带的包名，禁止任意 Intent、组件、URI 和 shell 参数。Agent 和 Android 都会拒绝目录外包名。
 3. **敏感操作确认**：发送、删除、支付、转账等目标即使模型未标记，也由 Python 和 Android 按当前节点文本再次判定并要求用户确认。
 4. **失败即收敛**：动作被拒绝、取消、失败或无法观察到新鲜 UI 时，停止本轮后续动作和观察，不把未执行动作写入历史。
 5. **权限隔离**：Shizuku 只暴露参数受限的输入/滑动方法；云端不可直接访问设备。

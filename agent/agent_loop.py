@@ -37,9 +37,12 @@ SYSTEM_PROMPT = (
     "- 若提供了\"上一轮屏幕节点\"：完成本轮规划后，再**对比两轮**——本轮每个组件的可见性较上轮发生了哪些变化（哪些新增可见、哪些变为不可见、哪些位置/图层变了）；把这些变化及其含义写进思考。\n"
     "第二步——根据可见性规划结果做决策：\n"
     "- 动作前进性：优先选择能让你接近目标的操作。若一步后界面没有变化，重新做可见性规划再决定。\n"
+    "- 启动应用：请求中的“允许启动的应用”目录是唯一可 launch 的包名来源。若用户目标命中目录且当前不在"
+    "该应用前台，必须优先 launch，再请求新的 UI 采集；不得先 home 后在桌面翻找图标。目录为空或目标不在"
+    "目录时，不得猜测包名或输出 launch。\n"
     "- 最后单独输出一行、一个 JSON 对象作为你的指令，从以下动作中选择：\n"
     "  click(需 target_node_id), type(需 target_node_id+text), swipe(x1/y1/x2/y2/duration_ms), "
-    "back, home, wait(ms), reply(给用户的话), done。\n"
+    "back, home, launch(需 package_name), wait(ms), reply(给用户的话), done。\n"
     "  思考文字务必在前面（含可见性规划结论），JSON 指令放在回复的最后一行。当某一步做不了时指令为 "
     '{"type":"reply","text":"..."}；任务完成时指令为 {"type":"done"}。\n'
     '节点行格式：[id] [层N] 类型"文本" (cx,cy) bounds=[x1,y1][x2,y2] [clickable/focusable/focused]。click 和 type 的 target_node_id 必须是该节点'
@@ -98,6 +101,7 @@ def _build_user_message(
     window_layers: str = "",
     observation_note: str = "",
     previous_nodes: str = "",
+    launchable_apps: Optional[list[dict]] = None,
 ) -> str:
     segs = [f"用户意图：{intent}"]
     if observation_note:
@@ -122,6 +126,13 @@ def _build_user_message(
         )
     if activity:
         segs.insert(2 if app else 1, f"当前前台窗口类名：{activity}")
+    if launchable_apps:
+        catalog = "\n".join(
+            f"- {entry['label']} | {entry['package_name']}" for entry in launchable_apps
+        )
+        segs.append("允许启动的应用（仅可从此目录选择 package_name）：\n" + catalog)
+    else:
+        segs.append("允许启动的应用：空（不得猜测包名或输出 launch）。")
     if history:
         segs.append("前面的动作/观察：")
         segs.extend(json.dumps(h, ensure_ascii=False) for h in history)
@@ -188,6 +199,14 @@ def _normalize_known_node_ids(resp: dict, nodes: list[dict]) -> None:
             action["target_node_id"] = int(target_node_id)
 
 
+def _launch_actions_are_allowed(resp: dict, launchable_apps: Optional[list[dict]]) -> bool:
+    allowed_packages = {entry.get("package_name") for entry in launchable_apps or []}
+    return all(
+        action.get("type") != "launch" or action.get("package_name") in allowed_packages
+        for action in resp.get("actions", [])
+    )
+
+
 def decide_once(
     *,
     llm,
@@ -199,6 +218,7 @@ def decide_once(
     activity: Optional[str] = None,
     observation_note: str = "",
     previous_nodes: str = "",
+    launchable_apps: Optional[list[dict]] = None,
     max_retries: int = 1,
 ) -> dict:
     """单轮决策：摘要 + 调 LLM + 净化 + schema 校验。返回合法 agent_response。
@@ -210,7 +230,7 @@ def decide_once(
     user_msg = _build_user_message(
         intent, nodes, history or [], app=app, activity=activity,
         window_layers=to_window_layers(ui_xml), observation_note=observation_note,
-        previous_nodes=previous_nodes,
+        previous_nodes=previous_nodes, launchable_apps=launchable_apps,
     )
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -274,6 +294,20 @@ def decide_once(
 
         _normalize_known_node_ids(resp, nodes)
         _enforce_sensitive_confirmation(resp, nodes)
+        if not _launch_actions_are_allowed(resp, launchable_apps):
+            if attempt < max_retries:
+                messages.append({"role": "assistant", "content": raw[:2000]})
+                messages.append({
+                    "role": "user",
+                    "content": "launch 的 package_name 不在允许启动的应用目录中。请不要猜测包名，重新输出合法 JSON。",
+                })
+                continue
+            return _safe_response(session_id, "请求启动的应用未获用户授权")
+        if any(action.get("type") == "launch" for action in resp.get("actions", [])):
+            # Launch must be followed by a fresh target-app observation, even if the model
+            # incorrectly marks its response as terminal.
+            resp["done"] = False
+            resp["need_observation"] = True
         errs = validate(resp, "agent_response")
         if not errs:
             return resp
