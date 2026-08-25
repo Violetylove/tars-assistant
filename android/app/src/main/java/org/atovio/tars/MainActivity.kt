@@ -31,6 +31,7 @@ import java.util.concurrent.Executors
 class MainActivity : Activity() {
     private val executor = Executors.newSingleThreadExecutor()
     private lateinit var connectionStatus: TextView
+    private lateinit var terminateButton: Button
     private lateinit var intentInput: EditText
     private lateinit var send: Button
     private lateinit var timeline: LinearLayout
@@ -38,6 +39,9 @@ class MainActivity : Activity() {
     private lateinit var voice: VoiceIntentCapture
     private val timelineEntries = mutableListOf<TimelineEntry>()
     @Volatile private var requestInFlight = false
+    @Volatile private var cancelRequested = false
+    @Volatile private var activeAgentClient: AgentClient? = null
+    @Volatile private var taskThread: Thread? = null
     @Volatile private var readinessCheckInFlight = false
     private var lastReadinessSignature: String? = null
     private var blockedIntent: String? = null
@@ -153,6 +157,13 @@ class MainActivity : Activity() {
         connectionStatus = TextView(this@MainActivity).apply { text = "等待无障碍服务连接"; textSize = 12f; setTextColor(Color.rgb(71, 85, 105)) }
         labels.addView(connectionStatus)
         addView(labels, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        terminateButton = Button(this@MainActivity).apply {
+            text = "终止任务"
+            isAllCaps = false
+            setTextColor(Color.rgb(185, 28, 28))
+            setOnClickListener { terminateTask() }
+        }
+        addView(terminateButton, LinearLayout.LayoutParams(dp(92), dp(48)))
         addView(TextView(this@MainActivity).apply {
             contentDescription = "打开设置"
             text = "⚙"
@@ -208,15 +219,26 @@ class MainActivity : Activity() {
         }
         send.isEnabled = false
         requestInFlight = true
+        cancelRequested = false
+        terminateButton.text = "终止任务"
         setConnectionStatus("正在检查 Agent 服务")
         executor.execute {
+            taskThread = Thread.currentThread()
+            val client = AgentClient(this)
+            activeAgentClient = client
             val agentReady = try {
-                AgentClient(this).health()
+                !cancelRequested && client.health()
             } catch (_: Exception) {
                 false
             }
+            if (cancelRequested) {
+                finishCancelledTask()
+                return@execute
+            }
             if (!agentReady) {
                 requestInFlight = false
+                activeAgentClient = null
+                taskThread = null
                 runOnUiThread {
                     send.isEnabled = true
                     reportReadinessIssues(listOf(agentUnavailableIssue()), forceAnnouncement = true)
@@ -230,16 +252,15 @@ class MainActivity : Activity() {
                 setConnectionStatus("任务进行中")
                 appendLog("正在采集当前界面并请求 Agent 决策。")
             }
-            runTask(taskIntent)
+            runTask(taskIntent, client)
         }
     }
 
-    private fun runTask(taskIntent: String) {
+    private fun runTask(taskIntent: String, client: AgentClient) {
         val runtime = RuntimeSettings.read(this)
         var completedByAgent = false
         var reachedRoundLimit = true
         try {
-            val client = AgentClient(this)
             val service = TarsAccessibilityService.instance
                 ?: throw IllegalStateException("无障碍服务已断开，请重新连接后发送")
             val history = JSONArray()
@@ -247,6 +268,10 @@ class MainActivity : Activity() {
             var consecutiveNoChange = 0
             var noteForNextRound = ""
             for (round in 0 until runtime.maxObservationRounds) {
+                if (cancelRequested) {
+                    finishCancelledTask()
+                    return
+                }
                 val uiXml = service.currentUiXml()
                 val observationVersion = service.currentObservationVersion()
                 val foreground = service.currentAppPackage() ?: UNKNOWN_FOREGROUND
@@ -260,6 +285,10 @@ class MainActivity : Activity() {
                 if (response.reply.isNotBlank()) appendLog(response.reply)
                 val execution = service.execute(response.actions, ::confirmAction)
                 execution.messages.forEach(::appendLog)
+                if (cancelRequested) {
+                    finishCancelledTask()
+                    return
+                }
                 if (!execution.completed) {
                     consecutiveNoChange++
                     noteForNextRound = NO_CHANGE_NOTE
@@ -283,6 +312,10 @@ class MainActivity : Activity() {
                     break
                 }
                 val pkgChanged = service.currentAppPackage() != null && service.currentAppPackage() != foreground
+                if (cancelRequested) {
+                    finishCancelledTask()
+                    return
+                }
                 if (!service.awaitFreshUiAfter(uiXml, foreground, runtime.observationTimeoutMs, observationVersion) && !pkgChanged) {
                     consecutiveNoChange++
                     noteForNextRound = NO_CHANGE_NOTE
@@ -300,11 +333,43 @@ class MainActivity : Activity() {
             if (reachedRoundLimit) appendLog("已达到最大观察轮数，已停止任务。")
             runOnUiThread { setConnectionStatus(if (completedByAgent) "任务完成" else "任务已结束") }
         } catch (e: Exception) {
-            appendLog("请求失败：${e.message}")
-            runOnUiThread { setConnectionStatus("任务失败") }
+            if (cancelRequested) {
+                finishCancelledTask()
+            } else {
+                appendLog("请求失败：${e.message}")
+                runOnUiThread { setConnectionStatus("任务失败") }
+            }
         } finally {
             requestInFlight = false
+            activeAgentClient = null
+            taskThread = null
+            cancelRequested = false
             runOnUiThread { send.isEnabled = true }
+        }
+    }
+
+    private fun terminateTask() {
+        if (!requestInFlight) {
+            setConnectionStatus("当前没有运行中的任务")
+            appendLog("当前没有运行中的任务。")
+            return
+        }
+        cancelRequested = true
+        activeAgentClient?.cancel()
+        taskThread?.interrupt()
+        setConnectionStatus("正在终止任务")
+        appendLog("已请求终止任务，正在停止当前请求。")
+    }
+
+    private fun finishCancelledTask() {
+        requestInFlight = false
+        activeAgentClient = null
+        taskThread = null
+        runOnUiThread {
+            setConnectionStatus("任务已终止")
+            send.isEnabled = true
+            terminateButton.text = "终止任务"
+            appendLog("任务已终止。")
         }
     }
 

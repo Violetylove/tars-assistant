@@ -11,6 +11,7 @@ class AgentClient(context: android.content.Context) {
     private val baseUrl = "http://${RuntimeSettings.toUrlAuthority(settings.agentHost)}:${settings.agentPort}"
     private val endpoint = URI(baseUrl)
     private val isLoopback = RuntimeSettings.isLoopbackHost(settings.agentHost)
+    @Volatile private var activeConnection: HttpURLConnection? = null
 
     init {
         require(endpoint.scheme == "http" && endpoint.host != null && endpoint.port in 1..65_535) {
@@ -19,6 +20,10 @@ class AgentClient(context: android.content.Context) {
     }
 
     fun health(): Boolean = request("GET", "/health", null, HEALTH_TIMEOUT_MS).first == 200
+
+    fun cancel() {
+        activeConnection?.disconnect()
+    }
 
     fun run(request: TaskRequest): AgentResponse {
         val (status, body) = request("POST", "/agent/run", request.toJson())
@@ -47,11 +52,15 @@ class AgentClient(context: android.content.Context) {
                 outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
             }
         }
+        activeConnection = conn
         return try {
             val status = conn.responseCode
             val stream = if (status >= 400) conn.errorStream else conn.inputStream
             status to (stream?.bufferedReader()?.use { it.readText() } ?: "")
-        } finally { conn.disconnect() }
+        } finally {
+            if (activeConnection === conn) activeConnection = null
+            conn.disconnect()
+        }
     }
 
     private companion object {
