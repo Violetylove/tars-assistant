@@ -15,6 +15,8 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 
 class SettingsActivity : Activity() {
     private lateinit var status: TextView
@@ -51,8 +53,8 @@ class SettingsActivity : Activity() {
         content.addView(sectionTitle("运行参数"))
         maxRounds = settingField(content, "最大观察轮数", InputType.TYPE_CLASS_NUMBER)
         observationTimeout = settingField(content, "界面观察超时（毫秒）", InputType.TYPE_CLASS_NUMBER)
-        agentHost = settingField(content, "Agent loopback 地址", InputType.TYPE_CLASS_TEXT)
-        agentPort = settingField(content, "Agent loopback 端口", InputType.TYPE_CLASS_NUMBER)
+        agentHost = settingField(content, "Agent 服务主机地址", InputType.TYPE_CLASS_TEXT)
+        agentPort = settingField(content, "Agent 服务端口", InputType.TYPE_CLASS_NUMBER)
         modelTimeout = settingField(content, "模型请求超时（毫秒）", InputType.TYPE_CLASS_NUMBER)
         reminderDelay = settingField(content, "手动提醒延时（毫秒）", InputType.TYPE_CLASS_NUMBER)
         newAppGrace = settingField(content, "新应用渲染宽限（毫秒）", InputType.TYPE_CLASS_NUMBER)
@@ -67,7 +69,22 @@ class SettingsActivity : Activity() {
             setPadding(0, dp(12), 0, 0)
         }
         content.addView(status)
-        setContentView(ScrollView(this).apply { addView(content) })
+        val scrollView = ScrollView(this).apply {
+            clipToPadding = false
+            ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
+                val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                view.setPadding(
+                    systemBars.left,
+                    systemBars.top,
+                    systemBars.right,
+                    systemBars.bottom,
+                )
+                insets
+            }
+            addView(content)
+        }
+        setContentView(scrollView)
+        ViewCompat.requestApplyInsets(scrollView)
         populateSettings()
         refreshServiceState()
     }
@@ -108,14 +125,16 @@ class SettingsActivity : Activity() {
             text = label
             setTextColor(Color.rgb(51, 65, 85))
             textSize = 14f
-            setPadding(0, dp(8), 0, 0)
+            setPadding(0, dp(14), 0, dp(7))
         })
         return EditText(this).apply {
             this.inputType = inputType
             setSingleLine(true)
             background = roundedBackground(Color.WHITE, Color.rgb(203, 213, 225))
             setPadding(dp(12), dp(8), dp(12), dp(8))
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = dp(4)
+            }
             parent.addView(this)
         }
     }

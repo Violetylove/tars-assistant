@@ -8,12 +8,13 @@ import java.net.URL
 
 class AgentClient(context: android.content.Context) {
     private val settings = RuntimeSettings.read(context.applicationContext)
-    private val baseUrl = "http://${settings.agentHost.let { if (it == "::1") "[$it]" else it }}:${settings.agentPort}"
+    private val baseUrl = "http://${RuntimeSettings.toUrlAuthority(settings.agentHost)}:${settings.agentPort}"
+    private val endpoint = URI(baseUrl)
+    private val isLoopback = RuntimeSettings.isLoopbackHost(settings.agentHost)
 
     init {
-        val endpoint = URI(baseUrl)
-        require(endpoint.scheme == "http" && endpoint.host in LOOPBACK_HOSTS && endpoint.port in 1..65_535) {
-            "Agent endpoint must be the local HTTP loopback service"
+        require(endpoint.scheme == "http" && endpoint.host != null && endpoint.port in 1..65_535) {
+            "Agent endpoint must be a valid HTTP host and port"
         }
     }
 
@@ -28,9 +29,9 @@ class AgentClient(context: android.content.Context) {
     }
 
     private fun request(method: String, path: String, payload: JSONObject?): Pair<Int, String> {
-        // The Android-wide proxy may be needed by Gmail or the cloud model, but the
-        // App-to-Agent contract is always same-device loopback and must stay direct.
-        val conn = (URL(baseUrl.trimEnd('/') + path).openConnection(Proxy.NO_PROXY) as HttpURLConnection).apply {
+        val url = URL(baseUrl.trimEnd('/') + path)
+        // Loopback must stay direct; a configured remote Agent follows the device network path.
+        val conn = ((if (isLoopback) url.openConnection(Proxy.NO_PROXY) else url.openConnection()) as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = 5_000
             readTimeout = settings.modelRequestTimeoutMs
@@ -46,9 +47,5 @@ class AgentClient(context: android.content.Context) {
             val stream = if (status >= 400) conn.errorStream else conn.inputStream
             status to (stream?.bufferedReader()?.use { it.readText() } ?: "")
         } finally { conn.disconnect() }
-    }
-
-    companion object {
-        private val LOOPBACK_HOSTS = RuntimeSettings.LOOPBACK_HOSTS
     }
 }

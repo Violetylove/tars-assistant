@@ -9,8 +9,8 @@ Python Agent 负责安全决策；云端仅提供 OpenAI-compatible 大模型推
 
 **原生 App -> 本机 Termux Agent -> HTTPS 云端模型 -> Agent 安全校验 -> 原生 App 执行**
 
-Android 与 Agent 仍只通过 `http://127.0.0.1:8080` 通信。模型 API Key 仅保存在 Termux 的私有
-配置中，绝不放入 Android APK、Git 或云端模型请求以外的地方。
+Android 默认通过 `http://127.0.0.1:8080` 连接 Agent，也可在设置页配置受信任的 Agent 主机与端口。远程
+Agent 会收到任务文本与压缩 UI 摘要；模型 API Key 仍仅保存在 Termux 的私有配置中，绝不放入 Android APK、Git 或云端模型请求以外的地方。
 
 ## 云端配置
 

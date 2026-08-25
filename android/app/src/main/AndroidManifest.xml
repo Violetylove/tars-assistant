@@ -7,7 +7,13 @@
         <package android:name="com.google.android.gm" />
         <package android:name="com.tencent.mm" />
     </queries>
-    <application android:theme="@style/AppTheme" android:label="TARS Assistant" android:allowBackup="false" android:usesCleartextTraffic="true">
+    <application
+        android:theme="@style/AppTheme"
+        android:label="TARS Assistant"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:allowBackup="false"
+        android:usesCleartextTraffic="true">
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"

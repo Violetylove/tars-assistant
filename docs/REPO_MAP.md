@@ -7,7 +7,7 @@
 ```text
 MainActivity / 触发器
   -> TarsAccessibilityService.currentUiXml()
-  -> AgentClient POST 127.0.0.1:8080/agent/run
+  -> AgentClient POST configured Agent endpoint /agent/run
   -> agent.server.agent_run()
   -> agent.agent_loop.decide_once()
   -> agent.ui_summarizer (动作节点 + 结构事实)
@@ -37,7 +37,7 @@ MainActivity / 触发器
 | `MainActivity.kt` | 任务循环、`MAX_OBSERVATION_ROUNDS` | 收集 XML/前台/历史，调用 Agent，执行响应，等待新 UI；不在这里做 UI 摘要或模型决策。 |
 | `TarsAccessibilityService.kt` | `currentUiXml`、`collectVisibleWindowRoots`、`collectVisibleNodes`、`awaitFreshUiAfter` | 无障碍事件、窗口树采集、XML 序列化、动作后新鲜度判定。`collectVisibleNodes` 的动作节点排序必须和 Python 摘要一致。 |
 | `ActionExecutor.kt` | `execute`、`findNode`、`findEditableNode` | 动作白名单、敏感操作确认、摘要 ID -> 活节点映射。修改交互筛选/排序时必须同步 `agent/ui_summarizer.py`。 |
-| `AgentClient.kt` | `run`、`request` | 只允许直连 `127.0.0.1:8080`；校验 response 的 session ID。 |
+| `AgentClient.kt` | `run`、`request` | 默认直连 `127.0.0.1:8080`；设置页可配置有效 Agent 主机与端口，始终校验 response 的 session ID。 |
 | `Protocol.kt` | `TaskRequest`、`AgentAction`、`AgentResponse` | Android 协议模型；字段修改需同步 `bridge/schemas.py` 和设计契约。 |
 | `ShizukuGateway.kt` | `typeText`、`swipe` | Shizuku 仅作受限文本输入和滑动回退，不采集 UI、不执行任意 shell。 |
 | `ShellInputUserService.kt` / `IInputService.aidl` | Shizuku UserService | 为 `ShizukuGateway` 提供进程外输入能力。 |

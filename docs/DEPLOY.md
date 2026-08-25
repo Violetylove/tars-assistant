@@ -6,7 +6,7 @@
 - Termux Python Agent：自研安全决策循环、UI 摘要、schema 校验和固定技能路由。
 - 云端：只提供 OpenAI-compatible 大模型 API；不托管 TARS Agent，也不直接调用 Android。
 
-Android 与 Agent 固定为同一设备上的 `http://127.0.0.1:8080`。Agent 调云端模型必须使用 HTTPS。
+Android 默认连接同一设备上的 `http://127.0.0.1:8080`，也可在设置页配置受信任的远程 Agent 主机与端口。Agent 调云端模型必须使用 HTTPS。
 云端调用会发送任务文本与压缩后的 UI 摘要；部署前应确认所选服务商的数据处理和保留策略符合使用场景。
 
 ## 1. 云端模型私有配置
@@ -99,7 +99,7 @@ Portal 回退，无需配置代理即可首次下载公开构建依赖。若所�
 不要把代理凭据提交到仓库。
 
 安装 Debug APK 后，在系统设置中显式开启 TARS 无障碍服务；根据功能需要授予通知访问、麦克风和
-Shizuku 权限。Android App 只使用本机 loopback Agent，不能配置外部 URL。
+Shizuku 权限。Android App 默认使用本机 loopback Agent；若改用远程主机，任务文本与压缩 UI 摘要将发送至该 Agent，应仅使用受信任网络。
 
 ### AVD 自动授权与 Shizuku
 

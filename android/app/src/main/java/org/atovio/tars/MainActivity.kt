@@ -20,6 +20,8 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.CountDownLatch
@@ -107,6 +109,16 @@ class MainActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.rgb(248, 250, 252))
+            ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
+                val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                view.setPadding(
+                    systemBars.left,
+                    systemBars.top,
+                    systemBars.right,
+                    systemBars.bottom,
+                )
+                insets
+            }
         }
         root.addView(topBar())
         root.addView(View(this).apply { setBackgroundColor(Color.rgb(226, 232, 240)); layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)) })
@@ -119,6 +131,7 @@ class MainActivity : Activity() {
         root.addView(conversationScroll)
         root.addView(composer())
         setContentView(root)
+        ViewCompat.requestApplyInsets(root)
     }
 
     private fun topBar(): View = LinearLayout(this).apply {

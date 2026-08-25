@@ -2,7 +2,7 @@
 
 这是阶段 4 的原生 Kotlin 执行侧最小工程：
 
-- `AgentClient` 使用 `HttpURLConnection` 调用 `127.0.0.1:8080`
+- `AgentClient` 使用 `HttpURLConnection` 调用默认的 `127.0.0.1:8080` 或设置页配置的 Agent 主机
 - `TarsAccessibilityService` 采集当前无障碍树并序列化为 `ui_xml`
 - 无障碍事件提供最近前台应用包名和窗口类名，随每轮 `task_request` 一并回传给 Agent
 - 无障碍服务连接后会在主界面显示已连接状态
@@ -27,7 +27,6 @@ Shizuku”并在 Shizuku 弹窗确认；服务不可用、未授权或参数非�
 启用悬浮语音前，须先启用无障碍服务并授予麦克风权限；它不需要广泛的“显示在其他应用上层”
 权限。
 
-Android 的 cleartext 默认策略会阻止 HTTP，因此 Manifest 明确启用了 cleartext。`AgentClient`
-同时强制端点只能是 `http://127.0.0.1:8080` 或 `http://[::1]:8080`，不能配置到远程主机。
-即使设备设置了全局 HTTP 代理，客户端也会对该 loopback 请求显式使用 `Proxy.NO_PROXY`，避免代理
-错误接管 App↔Agent 的本机通信。
+Android 的 cleartext 默认策略会阻止 HTTP，因此 Manifest 明确启用了 cleartext。`AgentClient` 默认访问
+`http://127.0.0.1:8080`，设置页可改为有效 IPv4、IPv6 或域名与端口。loopback 请求显式使用
+`Proxy.NO_PROXY`，远程主机则使用设备网络路径；远程 HTTP Agent 应仅部署在受信任网络中。

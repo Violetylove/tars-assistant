@@ -16,7 +16,7 @@
 | D3 | 模型规格 | 云端 OpenAI-compatible 大模型；模型 ID 经私有配置切换 |
 | D4 | 目标范围 | 通用对话 + 少量固定技能 |
 | D5 | 推理生命周期 | 云端按请求调用；手机不部署模型进程 |
-| D6 | 通信主干 | 纯 HTTP loopback（127.0.0.1:8080），不引常驻通道 |
+| D6 | 通信主干 | 纯 HTTP Agent endpoint（默认 loopback `127.0.0.1:8080`，设置页可改受信任远程主机），不引常驻通道 |
 | D7 | Termux:API 定位 | 感知插件（剪贴板等），不作通信主干；语音用 SpeechRecognizer |
 | D8 | Agent 环境 | 裸 Termux + venv（非 proot 常驻容器） |
 | D9 | 测试环境 | AVD 优先（Google APIs 镜像） |
@@ -50,7 +50,7 @@
 ### 二期候选：用户运行配置
 
 - [x] 建立参数登记基础：`docs/RUNTIME_CONFIG.md` 按「A 类计划用户可配置 / B 类安全白名单 / C 类已配置化」登记全部运行时参数。
-- [x] 面向用户的本地设置界面（轮数、loopback 地址、超时等 A 类参数），值须过范围与 loopback 校验。
+- [x] 面向用户的本地设置界面（轮数、Agent 地址、超时等 A 类参数），值须过范围与主机格式校验。
 - [x] 配置变更展示生效范围并支持恢复安全默认值；云端凭据仍仅存 Termux 私有 `config/cloud.yaml`。
 - [ ] 启动目标应用方式优化：当前以 `home` → 桌面点图标方式启动不精确；计划改白名单 `launch`（PackageManager 启动 Intent），仍禁止任意 Intent/组件/URI，二期评估。
 

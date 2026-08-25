@@ -8,12 +8,12 @@
 - AVD：`TARS_MODEL_API_35`，Android 15 / Google APIs / x86_64 / Pixel 5；6 vCPU、6 GB RAM、16 GB 数据盘。
 - Android App：`org.atovio.tars` Debug APK。通知访问、麦克风、Shizuku 授权按需由用户在系统 UI 确认；受控 AVD 可用 ADB 自动授权（见下）。
 - Termux：官方 x86_64；保留 `~/tars-assistant` 与 `.venv` 运行自研 Python Agent；**不再安装/运行 llama.cpp、GGUF、本地模型服务**（本地模型方案已废弃）。
-- 通信：Android App 仅访问本机 `http://127.0.0.1:8080`；Termux Agent 经 HTTPS 访问云端 OpenAI-compatible 模型 API。
+- 通信：Android App 默认访问本机 `http://127.0.0.1:8080`，设置页也允许受信任远程 Agent 主机；Termux Agent 经 HTTPS 访问云端 OpenAI-compatible 模型 API。
 - 私有云端配置（`config/cloud.yaml`）仅存 Termux 私有目录，不进入 Git/APK/日志；API Key 不得泄露。
 
 ## 已验收能力
 
-- **Android 执行侧**：APK 安装、无障碍 UI 树采集（`getWindows` 多图层 + 跨图层遮挡剔除）、loopback HTTP、定时提醒、通知监听、悬浮语音、Shizuku 受限 swipe/type 回退。
+- **Android 执行侧**：APK 安装、无障碍 UI 树采集（`getWindows` 多图层 + 跨图层遮挡剔除）、默认 loopback HTTP/可配置 Agent 主机、定时提醒、通知监听、悬浮语音、Shizuku 受限 swipe/type 回退。
 - **Agent 决策侧**：FastAPI 服务、UI 摘要器（可交互节点含层/完整矩形/交互状态）、自研安全循环 + schema 校验、固定技能路由、云端接入与有界重试。
 - **协议与安全**：`task_request`/`agent_response`/`action` 校验、动作白名单、敏感操作二次确认、失败收敛、观察新鲜度、history/动作数量边界。
 - **真实模型关键链路**：TARS→桌面→目标应用→输入→`done` 的完整多轮；敏感点击确认弹窗取消后安全停止；`launch` 白名单仅启动系统设置/Gmail 等。

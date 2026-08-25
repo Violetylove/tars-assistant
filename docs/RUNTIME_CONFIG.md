@@ -7,7 +7,7 @@
 > 任何新增/调整运行时参数应先在此登记，再实现代码，避免参数散落、难以审计。
 >
 > 分类约定：
-> - **A 类 — 计划用户可配置**：后续设置界面可开放，但所有值必须过范围/loopback 校验，且支持恢复安全默认值。
+> - **A 类 — 计划用户可配置**：设置界面可开放，但所有值必须过范围与格式校验，且支持恢复安全默认值。
 > - **B 类 — 安全白名单**：为安全边界而恒定，**不开放**给用户配置（改变即破坏协议/防线）。
 > - **C 类 — 已配置化**：已有私有配置承载（如云端 `config/cloud.yaml`），不经 Android 设置页。
 
@@ -21,8 +21,8 @@
 |---|---|---|---|
 | `max_observation_rounds` | `12` | `RuntimeSettings.kt` | 已在设置页开放；仅允许 1–20，过低会截断突发组件后的多轮流程 |
 | `observation_timeout_ms` | `5000` | `RuntimeSettings.kt` / `MainActivity.kt` | 已在设置页开放；仅允许 2000–10000，动作后等待 UI 变化的新鲜度窗口 |
-| `agent_loopback_host` | `127.0.0.1` | `RuntimeSettings.kt` / `AgentClient.kt` | 已在设置页开放；仅允许 `127.0.0.1`/`::1`/`[::1]`，**拒绝任何非本机地址** |
-| `agent_loopback_port` | `8080` | `RuntimeSettings.kt` / `AgentClient.kt` | 已在设置页开放；仅允许 1–65535，必须与服务端一致 |
+| `agent_host` | `127.0.0.1` | `RuntimeSettings.kt` / `AgentClient.kt` | 已在设置页开放；允许有效 IPv4、IPv6 或域名，不能含协议、路径或端口；远程 HTTP 端点会传输任务文本与 UI 摘要，应使用受信任网络 |
+| `agent_port` | `8080` | `RuntimeSettings.kt` / `AgentClient.kt` | 已在设置页开放；仅允许 1–65535，必须与服务端一致 |
 | `model_request_timeout_ms` | `210000` | `RuntimeSettings.kt` / `AgentClient.kt` | 已在设置页开放；仅允许 60000–600000，覆盖云端推理与重试预算 |
 | `manual_reminder_delay_ms` | `900_000`（15 分钟） | `RuntimeSettings.kt` / `SettingsActivity.kt` | 已在设置页开放；仅允许 1 分钟到 7 天 |
 | `new_app_grace_ms` | `4000` | `RuntimeSettings.kt` / `TarsAccessibilityService.kt` | 已在设置页开放；仅允许 0–10000，新应用冷启动时为空树的额外等待宽限 |

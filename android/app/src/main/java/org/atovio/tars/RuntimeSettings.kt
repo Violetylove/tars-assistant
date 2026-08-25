@@ -7,6 +7,7 @@ object RuntimeSettings {
     private const val PREFS = "runtime_settings"
     private const val KEY_MAX_ROUNDS = "max_observation_rounds"
     private const val KEY_OBSERVATION_TIMEOUT = "observation_timeout_ms"
+    // Keep the existing preference keys so previously saved addresses remain available.
     private const val KEY_HOST = "agent_loopback_host"
     private const val KEY_PORT = "agent_loopback_port"
     private const val KEY_MODEL_TIMEOUT = "model_request_timeout_ms"
@@ -28,7 +29,7 @@ object RuntimeSettings {
         return Values(
             maxObservationRounds = safeInt(prefs, KEY_MAX_ROUNDS, DEFAULT_MAX_OBSERVATION_ROUNDS, 1..20),
             observationTimeoutMs = safeLong(prefs, KEY_OBSERVATION_TIMEOUT, DEFAULT_OBSERVATION_TIMEOUT_MS, 2_000L..10_000L),
-            agentHost = prefs.getString(KEY_HOST, DEFAULT_AGENT_HOST).takeIf { it in LOOPBACK_HOSTS } ?: DEFAULT_AGENT_HOST,
+            agentHost = prefs.getString(KEY_HOST, DEFAULT_AGENT_HOST)?.trim()?.takeIf(::isValidAgentHost) ?: DEFAULT_AGENT_HOST,
             agentPort = safeInt(prefs, KEY_PORT, DEFAULT_AGENT_PORT, 1..65_535),
             modelRequestTimeoutMs = safeInt(prefs, KEY_MODEL_TIMEOUT, DEFAULT_MODEL_REQUEST_TIMEOUT_MS, 60_000..600_000),
             manualReminderDelayMs = safeLong(prefs, KEY_REMINDER_DELAY, DEFAULT_MANUAL_REMINDER_DELAY_MS, 60_000L..604_800_000L),
@@ -58,7 +59,7 @@ object RuntimeSettings {
     private fun validate(values: Values): String? = when {
         values.maxObservationRounds !in 1..20 -> "观察轮数必须在 1 到 20 之间"
         values.observationTimeoutMs !in 2_000L..10_000L -> "界面观察超时必须在 2000 到 10000 毫秒之间"
-        values.agentHost !in LOOPBACK_HOSTS -> "Agent 地址只能是 127.0.0.1、::1 或 [::1]"
+        !isValidAgentHost(values.agentHost) -> "请输入有效的 Agent 主机地址（IPv4、IPv6 或域名）"
         values.agentPort !in 1..65_535 -> "Agent 端口必须在 1 到 65535 之间"
         values.modelRequestTimeoutMs !in 60_000..600_000 -> "模型请求超时必须在 60000 到 600000 毫秒之间"
         values.manualReminderDelayMs !in 60_000L..604_800_000L -> "提醒延时必须在 1 分钟到 7 天之间"
@@ -71,6 +72,21 @@ object RuntimeSettings {
 
     private fun safeLong(prefs: android.content.SharedPreferences, key: String, fallback: Long, range: LongRange): Long =
         try { prefs.getLong(key, fallback).takeIf { it in range } ?: fallback } catch (_: ClassCastException) { fallback }
+
+    fun isLoopbackHost(host: String): Boolean = host in LOOPBACK_HOSTS
+
+    fun toUrlAuthority(host: String): String = host.takeIf { it.startsWith("[") && it.endsWith("]") }
+        ?: if (host.contains(':')) "[$host]" else host
+
+    private fun isValidAgentHost(value: String): Boolean {
+        val host = value.trim()
+        if (host.isBlank() || host.length > 253 || host.contains(Regex("[\\s/@?#]"))) return false
+        return try {
+            java.net.URI("http://${toUrlAuthority(host)}:1").host != null
+        } catch (_: IllegalArgumentException) {
+            false
+        }
+    }
 
     const val DEFAULT_MAX_OBSERVATION_ROUNDS = 12
     const val DEFAULT_OBSERVATION_TIMEOUT_MS = 5_000L
