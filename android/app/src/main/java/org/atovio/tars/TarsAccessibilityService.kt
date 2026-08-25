@@ -219,8 +219,9 @@ class TarsAccessibilityService : AccessibilityService() {
             // A newly-launched app (cold start) can render its accessibility tree slowly, staying
             // blank for a couple of seconds. Give a package change a bounded grace so we don't
             // time out and drop the capture before the tree settles.
-            if (pkgChanged && currentUiXml.isBlank() && android.os.SystemClock.elapsedRealtime() < baseDeadline + NEW_APP_GRACE_MS) {
-                deadline = baseDeadline + NEW_APP_GRACE_MS
+            val newAppGraceMs = RuntimeSettings.read(this).newAppGraceMs
+            if (pkgChanged && currentUiXml.isBlank() && android.os.SystemClock.elapsedRealtime() < baseDeadline + newAppGraceMs) {
+                deadline = baseDeadline + newAppGraceMs
             }
             if (eventChanged) {
                 // Events frequently arrive before getWindows/rootInActiveWindow catches up. They
@@ -256,8 +257,6 @@ class TarsAccessibilityService : AccessibilityService() {
         const val ACTION_CONNECTED = "org.atovio.tars.ACCESSIBILITY_CONNECTED"
         @Volatile var instance: TarsAccessibilityService? = null
         private const val OBSERVATION_POLL_MS = 100L
-        // Extra wait for a freshly-launched app to render its accessibility tree (cold start).
-        private const val NEW_APP_GRACE_MS = 4_000L
         private const val TAG_A11Y = "TarsA11y"
     }
 }

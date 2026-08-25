@@ -19,13 +19,13 @@
 
 | 参数 | 当前默认值 | 代码归属 | 建议范围/校验 |
 |---|---|---|---|
-| `max_observation_rounds` | `12` | `MainActivity.kt` `MAX_OBSERVATION_ROUNDS` | 正整数，建议 1–20；过低会截断突发组件后的多轮流程 |
-| `observation_timeout_ms` | `5000` | `MainActivity.kt` `OBSERVATION_TIMEOUT_MS` | 正整数，建议 2000–10000；动作后等待 UI 变化的新鲜度窗口；新应用冷启动时偏慢，不宜过短 |
-| `agent_loopback_host` | `127.0.0.1` | `AgentClient.kt` `baseUrl` | 仅允许 loopback：`127.0.0.1`/`::1`/`[::1]`；**拒绝任何非本机地址** |
-| `agent_loopback_port` | `8080` | `AgentClient.kt` `AGENT_PORT` | 正整数 1–65535；必须与服务端一致 |
-| `model_request_timeout_ms` | `210000` | `AgentClient.kt` `MODEL_REQUEST_TIMEOUT_MS` | 正整数，建议 ≥ 60_000（覆盖云端推理 + 重试预算）；过短会误判超时 |
-| `manual_reminder_delay_ms` | `900_000`（15 分钟） | `MainActivity.kt` `FIFTEEN_MINUTES_MS` | 正整数；定时提醒延迟，默认 15 分钟 |
-| `new_app_grace_ms` | `4000` | `TarsAccessibilityService.kt` `NEW_APP_GRACE_MS` | 正整数；新应用冷启动时为空树额外等待的宽限期，防止尚未渲染就判超时 |
+| `max_observation_rounds` | `12` | `RuntimeSettings.kt` | 已在设置页开放；仅允许 1–20，过低会截断突发组件后的多轮流程 |
+| `observation_timeout_ms` | `5000` | `RuntimeSettings.kt` / `MainActivity.kt` | 已在设置页开放；仅允许 2000–10000，动作后等待 UI 变化的新鲜度窗口 |
+| `agent_loopback_host` | `127.0.0.1` | `RuntimeSettings.kt` / `AgentClient.kt` | 已在设置页开放；仅允许 `127.0.0.1`/`::1`/`[::1]`，**拒绝任何非本机地址** |
+| `agent_loopback_port` | `8080` | `RuntimeSettings.kt` / `AgentClient.kt` | 已在设置页开放；仅允许 1–65535，必须与服务端一致 |
+| `model_request_timeout_ms` | `210000` | `RuntimeSettings.kt` / `AgentClient.kt` | 已在设置页开放；仅允许 60000–600000，覆盖云端推理与重试预算 |
+| `manual_reminder_delay_ms` | `900_000`（15 分钟） | `RuntimeSettings.kt` / `SettingsActivity.kt` | 已在设置页开放；仅允许 1 分钟到 7 天 |
+| `new_app_grace_ms` | `4000` | `RuntimeSettings.kt` / `TarsAccessibilityService.kt` | 已在设置页开放；仅允许 0–10000，新应用冷启动时为空树的额外等待宽限 |
 
 ## B 类 — 安全白名单（不开放）
 
@@ -57,6 +57,6 @@
 ## 维护约定
 
 1. **协议先行**：新增/调整协议相关参数（动作、白名单、边界）必须先改 `docs/DESIGN.md` 与 `bridge/` schema，再更新本登记表与代码。
-2. **A 类开放时**：任一参数暴露给用户配置前，须在此表补上：校验实现位置、错误提示、恢复默认入口。
+2. **A 类开放时**：所有 A 类参数均已在 `SettingsActivity` 开放，由 `RuntimeSettings` 集中校验、持久化并提供恢复安全默认值入口。
 3. **B 类严禁放宽**：白名单只能收紧、不能放宽；评审任何改动时重点核对 B 类。
 4. **一致性**：`ui_summarizer.py` 与 Android `collect()` 的可交互判定、`ALLOWED` 与 `ACTION_TYPES`、两端敏感标签必须始终同步，改一处必须改两处。

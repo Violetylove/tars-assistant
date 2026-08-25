@@ -50,8 +50,8 @@
 ### 二期候选：用户运行配置
 
 - [x] 建立参数登记基础：`docs/RUNTIME_CONFIG.md` 按「A 类计划用户可配置 / B 类安全白名单 / C 类已配置化」登记全部运行时参数。
-- [ ] 面向用户的本地设置界面（轮数、loopback 地址、超时等 A 类参数），值须过范围与 loopback 校验。
-- [ ] 配置变更展示生效范围并支持恢复安全默认值；云端凭据仍仅存 Termux 私有 `config/cloud.yaml`。
+- [x] 面向用户的本地设置界面（轮数、loopback 地址、超时等 A 类参数），值须过范围与 loopback 校验。
+- [x] 配置变更展示生效范围并支持恢复安全默认值；云端凭据仍仅存 Termux 私有 `config/cloud.yaml`。
 - [ ] 启动目标应用方式优化：当前以 `home` → 桌面点图标方式启动不精确；计划改白名单 `launch`（PackageManager 启动 Intent），仍禁止任意 Intent/组件/URI，二期评估。
 
 ## 4. 风险清单

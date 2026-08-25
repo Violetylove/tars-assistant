@@ -6,10 +6,13 @@ import java.net.Proxy
 import java.net.URI
 import java.net.URL
 
-class AgentClient(private val baseUrl: String = "http://127.0.0.1:8080") {
+class AgentClient(context: android.content.Context) {
+    private val settings = RuntimeSettings.read(context.applicationContext)
+    private val baseUrl = "http://${settings.agentHost.let { if (it == "::1") "[$it]" else it }}:${settings.agentPort}"
+
     init {
         val endpoint = URI(baseUrl)
-        require(endpoint.scheme == "http" && endpoint.host in LOOPBACK_HOSTS && endpoint.port == AGENT_PORT) {
+        require(endpoint.scheme == "http" && endpoint.host in LOOPBACK_HOSTS && endpoint.port in 1..65_535) {
             "Agent endpoint must be the local HTTP loopback service"
         }
     }
@@ -30,7 +33,7 @@ class AgentClient(private val baseUrl: String = "http://127.0.0.1:8080") {
         val conn = (URL(baseUrl.trimEnd('/') + path).openConnection(Proxy.NO_PROXY) as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = 5_000
-            readTimeout = MODEL_REQUEST_TIMEOUT_MS
+            readTimeout = settings.modelRequestTimeoutMs
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
             doInput = true
             if (payload != null) {
@@ -46,9 +49,6 @@ class AgentClient(private val baseUrl: String = "http://127.0.0.1:8080") {
     }
 
     companion object {
-        private const val AGENT_PORT = 8080
-        // Covers the cloud model request budget plus the local Agent response overhead.
-        private const val MODEL_REQUEST_TIMEOUT_MS = 210_000
-        private val LOOPBACK_HOSTS = setOf("127.0.0.1", "::1", "[::1]")
+        private val LOOPBACK_HOSTS = RuntimeSettings.LOOPBACK_HOSTS
     }
 }
