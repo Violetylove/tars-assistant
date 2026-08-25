@@ -10,7 +10,7 @@
 - 任一动作被拒绝、取消或失败时，执行侧立即停止该轮，不再下发后续动作或观察请求
 - 任务的最终执行结果或失败信息会保留在主界面，不会被后续无障碍连接广播覆盖
 - 需要下一轮观察时，执行侧轮询直到动作后 UI XML 与原快照不同；2 秒内无更新则安全停止，避免传回陈旧或过渡 UI
-- 设置页可刷新并勾选允许启动的应用；每次任务仅将这些仍安装的 `{label, package_name}` 发送给 Agent，Agent 与 Android 执行侧都会拒绝目录外的 `launch`
+- 设置页的“应用启动”入口可进入独立列表页，刷新并勾选允许启动的应用；每次任务仅将这些仍安装的 `{label, package_name}` 发送给 Agent，Agent 与 Android 执行侧都会拒绝目录外的 `launch`
 - `ShizukuGateway` 用官方 UserService + AIDL 执行参数受限的 `input swipe`；当无障碍文本设置失败时，以 `input text` 回退，需用户显式授权
 - `VoiceIntentCapture` 使用原生 `SpeechRecognizer`；按住说话只填入任务意图，用户仍须检查并发送
 - 悬浮语音由已授权的无障碍服务创建 `TYPE_ACCESSIBILITY_OVERLAY` 按钮；按住识别的最终结果仅写入待处理任务，用户须在 App 中载入、检查并发送

@@ -37,11 +37,20 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug
 
+      - name: Name APK
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            apk_name="TARS-Assistant-${GITHUB_REF_NAME}.apk"
+          else
+            apk_name="TARS-Assistant-debug.apk"
+          fi
+          mv android/app/build/outputs/apk/debug/app-debug.apk "android/app/build/outputs/apk/debug/${apk_name}"
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7
         with:
           name: tars-android-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: android/app/build/outputs/apk/debug/TARS-Assistant-*.apk
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -51,5 +60,5 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: TARS Assistant ${{ github.ref_name }}
           generate_release_notes: true
-          files: android/app/build/outputs/apk/debug/*.apk
+          files: android/app/build/outputs/apk/debug/TARS-Assistant-*.apk
           fail_on_unmatched_files: true

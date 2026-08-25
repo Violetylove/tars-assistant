@@ -11,7 +11,6 @@ import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
-import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -29,8 +28,7 @@ class SettingsActivity : Activity() {
     private lateinit var modelTimeout: EditText
     private lateinit var reminderDelay: EditText
     private lateinit var newAppGrace: EditText
-    private lateinit var launchableAppsContainer: LinearLayout
-    private val launchAppChecks = linkedMapOf<String, CheckBox>()
+    private lateinit var launchAppsButton: Button
     private val draftIntent: String by lazy { intent.getStringExtra(EXTRA_DRAFT_INTENT).orEmpty() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,21 +63,20 @@ class SettingsActivity : Activity() {
         content.addView(button("恢复安全默认值") {
             RuntimeSettings.restoreDefaults(this)
             populateSettings()
-            refreshLaunchableApps()
+            refreshLaunchAppsButton()
             showStatus("已恢复安全默认值")
         })
-
-        content.addView(sectionTitle("允许启动的应用"))
-        content.addView(button("刷新应用列表") { refreshLaunchableApps() })
-        launchableAppsContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        content.addView(launchableAppsContainer)
-        content.addView(button("保存允许启动的应用") { saveLaunchableApps() })
-
         status = TextView(this).apply {
             setTextColor(Color.rgb(71, 85, 105))
             setPadding(0, dp(12), 0, 0)
         }
         content.addView(status)
+
+        content.addView(sectionTitle("应用启动"))
+        launchAppsButton = button("允许启动的应用") {
+            startActivity(Intent(this, LaunchableAppsActivity::class.java))
+        }
+        content.addView(launchAppsButton)
         val scrollView = ScrollView(this).apply {
             clipToPadding = false
             ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
@@ -97,13 +94,14 @@ class SettingsActivity : Activity() {
         setContentView(scrollView)
         ViewCompat.requestApplyInsets(scrollView)
         populateSettings()
-        refreshLaunchableApps()
+        refreshLaunchAppsButton()
         refreshServiceState()
     }
 
     override fun onResume() {
         super.onResume()
         if (::floatingVoiceButton.isInitialized) refreshServiceState()
+        if (::launchAppsButton.isInitialized) refreshLaunchAppsButton()
     }
 
     private fun header(): View = LinearLayout(this).apply {
@@ -176,55 +174,12 @@ class SettingsActivity : Activity() {
         showStatus("运行参数已保存，下次任务立即生效")
     }
 
-    private fun refreshLaunchableApps() {
-        val apps = LaunchableApps.installed(this)
-        val installedPackages = apps.mapTo(mutableSetOf()) { it.packageName }
-        val saved = RuntimeSettings.allowedLaunchPackages(this)
-        val missing = saved - installedPackages
-        val selected = saved - missing
-        if (missing.isNotEmpty()) RuntimeSettings.saveAllowedLaunchPackages(this, selected)
-
-        launchAppChecks.clear()
-        launchableAppsContainer.removeAllViews()
-        if (apps.isEmpty()) {
-            launchableAppsContainer.addView(TextView(this).apply {
-                text = "未找到可启动的应用"
-                setTextColor(Color.rgb(71, 85, 105))
-                setPadding(0, dp(8), 0, dp(8))
-            })
-        } else {
-            apps.forEach { app ->
-                val check = CheckBox(this).apply {
-                    text = "${app.label}\n${app.packageName}"
-                    textSize = 15f
-                    setPadding(0, dp(4), 0, dp(4))
-                    isChecked = app.packageName in selected
-                }
-                launchAppChecks[app.packageName] = check
-                launchableAppsContainer.addView(check)
-            }
-        }
-        showStatus(
-            if (missing.isEmpty()) "已刷新应用列表，共 ${apps.size} 个可启动应用"
-            else "已移除已卸载的应用：${missing.joinToString("、")}",
-        )
-    }
-
-    private fun saveLaunchableApps() {
-        val selected = launchAppChecks.filterValues { it.isChecked }.keys
+    private fun refreshLaunchAppsButton() {
         val installed = LaunchableApps.installed(this).mapTo(mutableSetOf()) { it.packageName }
-        val missing = selected - installed
-        val valid = selected - missing
-        if (valid.size > RuntimeSettings.MAX_ALLOWED_LAUNCH_PACKAGES) {
-            showStatus("最多可保存 ${RuntimeSettings.MAX_ALLOWED_LAUNCH_PACKAGES} 个允许启动的应用")
-            return
-        }
-        RuntimeSettings.saveAllowedLaunchPackages(this, valid)
-        refreshLaunchableApps()
-        showStatus(
-            if (missing.isEmpty()) "已保存 ${valid.size} 个允许启动的应用"
-            else "以下应用已卸载，未保存：${missing.joinToString("、")}",
-        )
+        val selected = RuntimeSettings.allowedLaunchPackages(this)
+        val valid = selected intersect installed
+        if (valid.size != selected.size) RuntimeSettings.saveAllowedLaunchPackages(this, valid)
+        launchAppsButton.text = "允许启动的应用（已选 ${valid.size}）"
     }
 
     private fun requestShizukuPermission() {
