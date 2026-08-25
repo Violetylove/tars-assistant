@@ -66,6 +66,16 @@ class Summarizer:
         # 屏幕尺寸（窗口图层/区域事实见 to_window_layers 对 <window-info> 的解析）。
         screen_w = _int_attr(root, "screen_w")
         screen_h = _int_attr(root, "screen_h")
+
+        def is_fullscreen(bounds: tuple[int, int, int, int]) -> bool:
+            # Keep the ID stream aligned with Android's collectVisibleNodes(),
+            # which omits interactive containers covering the entire display.
+            display_w = screen_w or 1080
+            display_h = screen_h or 2400
+            return (
+                bounds[2] - bounds[0] >= display_w - 1
+                and bounds[3] - bounds[1] >= display_h - 1
+            )
         # 递归行走：保留**树结构**（深度 + 父容器），id 用**树序**，让模型能想象出画面。
         # (layer, depth, parent_label, elem)
         layered: list[tuple[int, int, str, ET.Element]] = []
@@ -93,11 +103,13 @@ class Summarizer:
         kept: list[tuple[int, int, str, ET.Element, tuple[int, int, int, int]]] = []
         for layer, depth, parent_label, elem in sorted(layered, key=lambda x: x[0]):
             bounds = _parse_bounds(elem.get("bounds", ""))
-            is_fullscreen = bounds[2] >= 1079 and bounds[3] >= 2339
-            if layer > 0 and not is_fullscreen and self._is_fully_covered(bounds, covered):
+            fullscreen = is_fullscreen(bounds)
+            if fullscreen:
+                continue  # 与 Android 执行侧一致：全屏容器不进入动作 ID 流
+            if layer > 0 and self._is_fully_covered(bounds, covered):
                 continue  # 下层节点被上层完全覆盖 → 视觉不可见，剔除
             kept.append((layer, depth, parent_label, elem, bounds))
-            if layer == 0 and not is_fullscreen:
+            if layer == 0:
                 covered.append(bounds)  # 仅顶层非全屏节点占据区域覆盖下层
 
         nodes: List[dict] = []

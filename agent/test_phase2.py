@@ -109,6 +109,22 @@ def test_summarize_occludes_lower_layer_fully_covered_nodes():
     assert "C" in labels
 
 
+def test_summarize_skips_fullscreen_interactive_containers_for_id_alignment():
+    xml = (
+        '<hierarchy screen_w="1080" screen_h="2400">'
+        '<window layer="0">'
+        '<node text="" class="android.widget.ListView" focusable="true" '
+        'bounds="[0,0][1080,2400]">'
+        '<node text="目标" class="android.widget.Button" clickable="true" '
+        'bounds="[100,300][500,450]"/>'
+        '</node>'
+        '</window>'
+        '</hierarchy>'
+    )
+    nodes = summarize_xml(xml)
+    assert [(node["id"], node["text"]) for node in nodes] == [(0, "目标")]
+
+
 def test_to_llm_prompt_compact():
     nodes = summarize_xml(SIMPLE_XML)
     prompt = to_llm_prompt(nodes)
