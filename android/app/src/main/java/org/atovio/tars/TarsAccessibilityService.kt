@@ -100,12 +100,28 @@ class TarsAccessibilityService : AccessibilityService() {
             if (w.type != AccessibilityWindowInfo.TYPE_APPLICATION) continue
             w.root?.let { roots += it }
         }
-        // Fallback: some windows (esp. full-screen transparent app windows) can report a
-        // null root via getWindows(); make sure we never hand an empty tree downstream.
-        if (roots.isEmpty()) {
-            rootInActiveWindow?.let { roots += it }
+        // During app transitions getWindows() may expose a non-null placeholder root with
+        // no children (often bounds=[0,0][0,0], enabled=false). Do not let that stale root
+        // suppress the focused root fallback, which can already contain the real app tree.
+        val populated = roots.filter(::hasAccessibleContent)
+        if (populated.isNotEmpty()) return populated
+        rootInActiveWindow?.let { fallback ->
+            if (hasAccessibleContent(fallback)) return listOf(fallback)
         }
+        // Keep the original roots for diagnostics when both sources are still empty.
         return roots
+    }
+
+    /** True when a root contains a usable accessibility subtree rather than a placeholder. */
+    private fun hasAccessibleContent(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null) return false
+        for (index in 0 until node.childCount) {
+            if (hasAccessibleContent(node.getChild(index))) return true
+        }
+        return node.isEnabled && (
+            node.isClickable || node.isFocusable ||
+                !node.text.isNullOrBlank() || !node.contentDescription.isNullOrBlank()
+            )
     }
 
     /** Nodes that are visually reachable: not fully covered by an upper-layer node. */
@@ -210,13 +226,14 @@ class TarsAccessibilityService : AccessibilityService() {
             val pkgChanged = curPkg != null && curPkg != previousPackage
             val xmlChanged = currentUiXml.isNotBlank() && currentUiXml != previousUiXml
             val eventChanged = observationVersion != previousObservationVersion
+            val treePopulated = collectVisibleWindowRoots().any(::hasAccessibleContent)
             val xmlMatchesForeground = curPkg != null && currentUiXml.contains("package=\"$curPkg\"")
-            val fresh = xmlMatchesForeground && (pkgChanged || xmlChanged)
+            val fresh = treePopulated && xmlMatchesForeground && (pkgChanged || xmlChanged)
             val stable = fresh && stableCandidate == currentUiXml
             Log.i(TAG_A11Y, String.format(
-                "awaitFresh poll pkg=%s len=%d blank=%b pkgChanged=%b xmlChanged=%b eventChanged=%b xmlMatchesForeground=%b fresh=%b stable=%b",
-                curPkg, currentUiXml.length, currentUiXml.isBlank(), pkgChanged, xmlChanged,
-                eventChanged, xmlMatchesForeground, fresh, stable,
+                "awaitFresh poll pkg=%s len=%d blank=%b populated=%b pkgChanged=%b xmlChanged=%b eventChanged=%b xmlMatchesForeground=%b fresh=%b stable=%b",
+                curPkg, currentUiXml.length, currentUiXml.isBlank(), treePopulated, pkgChanged,
+                xmlChanged, eventChanged, xmlMatchesForeground, fresh, stable,
             ))
             if (stable) return true
             stableCandidate = if (fresh) currentUiXml else null
@@ -224,7 +241,7 @@ class TarsAccessibilityService : AccessibilityService() {
             // blank for a couple of seconds. Give a package change a bounded grace so we don't
             // time out and drop the capture before the tree settles.
             val newAppGraceMs = RuntimeSettings.read(this).newAppGraceMs
-            if (pkgChanged && currentUiXml.isBlank() && android.os.SystemClock.elapsedRealtime() < baseDeadline + newAppGraceMs) {
+            if (!treePopulated && android.os.SystemClock.elapsedRealtime() < baseDeadline + newAppGraceMs) {
                 deadline = baseDeadline + newAppGraceMs
             }
             if (eventChanged) {

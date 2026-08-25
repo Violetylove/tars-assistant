@@ -333,12 +333,11 @@ class MainActivity : Activity() {
                     reachedRoundLimit = false
                     break
                 }
-                val pkgChanged = service.currentAppPackage() != null && service.currentAppPackage() != foreground
                 if (cancelRequested) {
                     finishCancelledTask()
                     return
                 }
-                if (!service.awaitFreshUiAfter(uiXml, foreground, runtime.observationTimeoutMs, observationVersion) && !pkgChanged) {
+                if (!service.awaitFreshUiAfter(uiXml, foreground, runtime.observationTimeoutMs, observationVersion)) {
                     consecutiveNoChange++
                     noteForNextRound = NO_CHANGE_NOTE
                     appendLog("未观察到界面更新，正在重新采集当前界面（连续无变化第 $consecutiveNoChange 次）。")
