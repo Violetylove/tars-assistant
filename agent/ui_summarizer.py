@@ -104,6 +104,7 @@ class Summarizer:
         for _layer, depth, parent_label, elem, _bounds in kept:
             nodes.append({
                 "id": len(nodes),  # 树序唯一序号（执行侧 findNode 同序）
+                "_resource_id": elem.get("resource-id", ""),  # internal diff key; never shown to the LLM
                 "type": self._classify(elem),
                 "text": self._semantic_text(elem),
                 "bounds": list(_bounds),

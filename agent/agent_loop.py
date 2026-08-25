@@ -7,7 +7,7 @@
 - "LLM 输出不可信"：LLM 回复先 extract_json 净化，再过 bridge schema；非法一律拒绝，
   返回安全错误，绝不下发动作。
 - 模型解耦：llm 参数接受 LLMClient 或 MockLLM（鸭子类型，只需 complete(messages)）。
-- 多轮：后续轮带 need_observation 重采 UI，把新 UI 摘要并入对话历史。
+- 多轮：后续轮带 need_observation 重采 UI，把当前完整摘要和上一轮变化摘要交给模型。
 """
 
 from __future__ import annotations
@@ -109,7 +109,7 @@ def _build_user_message(
         # model explicitly so it does not repeat a no-op decision on an unchanged tree.
         segs.append(f"注意（上一轮反馈）：{observation_note}")
     if previous_nodes:
-        segs.extend(["上一轮屏幕节点（与当前对比，识别变化）：", previous_nodes])
+        segs.extend(["上一轮界面变化摘要（与当前对比）：", previous_nodes])
     if window_layers:
         segs.extend(["窗口图层（z 轴）与区域：", window_layers])
     if nodes:

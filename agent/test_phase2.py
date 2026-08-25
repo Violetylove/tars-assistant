@@ -7,6 +7,7 @@ import requests
 from fastapi.testclient import TestClient
 
 from agent.ui_summarizer import summarize_xml, to_window_layers, to_llm_prompt
+from agent.ui_diff import render_ui_diff
 from agent.llm_client import CloudRequestError, LLMClient, MockLLM, extract_json
 from agent.agent_loop import _build_user_message, decide_once, run_decision_loop
 from agent import server
@@ -180,8 +181,61 @@ def test_decision_prompt_includes_previous_nodes():
         "打开设置", summarize_xml(SIMPLE_XML), [],
         previous_nodes=prev_prompt,
     )
-    assert "上一轮屏幕节点（与当前对比，识别变化）：" in message
-    assert message.index("上一轮屏幕节点") < message.index("当前屏幕节点")
+    assert "上一轮界面变化摘要（与当前对比）：" in message
+    assert message.index("上一轮界面变化摘要") < message.index("当前屏幕节点")
+
+
+def _diff_node(node_id, text="按钮", *, resource_id="", bounds=None, focused=False):
+    return {
+        "id": node_id,
+        "_resource_id": resource_id,
+        "type": "button",
+        "text": text,
+        "bounds": bounds or [10, 20, 110, 80],
+        "clickable": True,
+        "focusable": False,
+        "focused": focused,
+        "layer": 0,
+        "depth": 0,
+        "container": "",
+    }
+
+
+def test_ui_diff_uses_resource_id_and_ignores_action_id_renumbering():
+    previous = [_diff_node(2, resource_id="app:id/send")]
+    current = [_diff_node(0, resource_id="app:id/send")]
+    diff = render_ui_diff(previous, current)
+    assert "无变化" in diff
+    assert "\n~ " not in diff
+    assert "\n+ " not in diff
+    assert "\n- " not in diff
+
+
+def test_ui_diff_reports_attribute_changes_with_old_and_new_lines():
+    previous = [_diff_node(2, text="下一步", resource_id="app:id/action")]
+    current = [_diff_node(0, text="完成", resource_id="app:id/action", focused=True)]
+    diff = render_ui_diff(previous, current)
+    assert "~ 旧:" in diff
+    assert "新:" in diff
+    assert 'button"下一步"' in diff
+    assert 'button(focused)"完成"' in diff
+
+
+def test_ui_diff_reports_added_and_removed_nodes():
+    previous = [_diff_node(0, text="旧按钮", resource_id="app:id/old")]
+    current = [_diff_node(0, text="新按钮", resource_id="app:id/new")]
+    diff = render_ui_diff(previous, current)
+    assert "+ " in diff and "新按钮" in diff
+    assert "- " in diff and "旧按钮" in diff
+
+
+def test_ui_diff_does_not_pair_duplicate_semantic_nodes():
+    previous = [_diff_node(0), _diff_node(1)]
+    current = [_diff_node(0), _diff_node(1)]
+    diff = render_ui_diff(previous, current)
+    # Duplicate labels are ambiguous without resource IDs: show additions/removals
+    # instead of claiming that an arbitrary old node is the same current node.
+    assert "+ " in diff and "- " in diff
 
 
 def test_decision_prompt_includes_user_selected_launchable_apps():
@@ -554,6 +608,22 @@ def test_server_keeps_previous_nodes_when_current_ui_is_empty():
     srv.agent_run(req)
     assert previous == ["", cached]
     assert srv._prev_nodes["keep-ui-cache"] == cached
+
+
+def test_server_passes_structured_ui_diff_on_second_nonempty_round():
+    srv = _fresh_server()
+    captured = []
+    srv.decision_fn = lambda **kwargs: captured.append(kwargs["previous_nodes"]) or {
+        "protocol_version": "1.0", "session_id": kwargs["session_id"], "done": True,
+        "reply": "OK", "actions": [], "need_observation": False,
+    }
+    changed_xml = SIMPLE_XML.replace('bounds="[40,200][760,300]"', 'bounds="[40,240][760,340]"')
+    req = {"protocol_version": "1.0", "session_id": "diff-context", "intent": "测试"}
+    srv.agent_run({**req, "ui_xml": SIMPLE_XML})
+    srv.agent_run({**req, "ui_xml": changed_xml})
+    assert captured[0] == ""
+    assert "上一轮界面变化摘要" not in captured[0]
+    assert "（+ 新增，- 消失，~ 属性变化" in captured[1]
 
 
 def test_server_configure_mock_runtime_runs_a_valid_response():

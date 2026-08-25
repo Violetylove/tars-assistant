@@ -27,6 +27,7 @@ from agent.cloud_config import load_cloud_config
 from agent.llm_client import LLMClient
 from agent.skill_router import route_fixed_skill
 from agent.ui_summarizer import summarize_xml, to_llm_prompt, to_window_layers
+from agent.ui_diff import render_ui_diff
 
 logger = logging.getLogger("tars.server")
 
@@ -89,6 +90,7 @@ def configure_runtime(*, mock: bool = False, base_url: str = "", model: str = ""
 # Session-level cache of the previous round's node lines, so the model can compare two
 # consecutive UI snapshots and reason about what changed (facts only, no attribution).
 _prev_nodes: dict[str, str] = {}
+_prev_node_models: dict[str, list[dict]] = {}
 
 
 def main() -> None:
@@ -227,12 +229,17 @@ def agent_run(req: dict) -> dict:
             app=req.get("app"),
             activity=req.get("activity"),
             observation_note=req.get("observation_note", ""),
-            previous_nodes=_prev_nodes.get(req["session_id"], ""),
+            previous_nodes=(
+                render_ui_diff(_prev_node_models.get(req["session_id"], []), _diag_nodes)
+                if _diag_nodes and _prev_node_models.get(req["session_id"])
+                else (_prev_nodes.get(req["session_id"], "") if not _diag_nodes else "")
+            ),
             launchable_apps=launchable_apps,
         )
         current_nodes = to_llm_prompt(_diag_nodes)
         if current_nodes:
             _prev_nodes[req["session_id"]] = current_nodes
+            _prev_node_models[req["session_id"]] = _diag_nodes
         response = _validate_response_for_request(resp, req["session_id"])
         logger.info("agent response session=%s source=llm actions=%s done=%s observe=%s",
                     req["session_id"], [a.get("type") for a in response.get("actions", [])],
