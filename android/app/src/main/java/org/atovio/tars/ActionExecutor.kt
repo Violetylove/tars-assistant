@@ -43,7 +43,7 @@ class ActionExecutor(
         "wait" -> action.ms != null && action.ms >= 0
         "swipe" -> listOf(action.x1, action.y1, action.x2, action.y2).all { it != null } &&
             action.durationMs != null && action.durationMs >= 0
-        "launch" -> action.packageName in LAUNCHABLE_PACKAGES
+        "launch" -> action.packageName?.let { LaunchableApps.isAllowedAndInstalled(service, it) } == true
         else -> true
     }
 
@@ -151,12 +151,6 @@ class ActionExecutor(
     companion object {
         private const val TAG = "TarsAction"
         private val ALLOWED = setOf("click", "type", "swipe", "back", "home", "launch", "wait", "reply", "done")
-        private val LAUNCHABLE_PACKAGES = setOf(
-            "com.android.settings",
-            "org.atovio.tars",
-            "com.google.android.gm",
-            "com.tencent.mm",
-        )
         private val SENSITIVE_LABELS = setOf("发送", "删除", "清除", "支付", "付款", "转账", "send", "delete", "pay")
     }
 }

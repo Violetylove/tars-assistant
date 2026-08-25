@@ -5,7 +5,7 @@
 - GET  /health     存活检查（App 联调用）
 
 设计：
-- 只监听 127.0.0.1（D6）：不暴露局域网，agent 与 App 同设备。
+- 默认监听 0.0.0.0，允许受信任设备通过配置的 Agent 地址访问。
 - 依赖注入 decision_fn：默认用云端大模型；测试注入 mock。
 """
 
@@ -29,6 +29,17 @@ from agent.skill_router import route_fixed_skill
 from agent.ui_summarizer import summarize_xml, to_llm_prompt, to_window_layers
 
 logger = logging.getLogger("tars.server")
+
+
+def _port(value: str) -> int:
+    try:
+        port = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("端口必须是整数") from exc
+    if port not in range(1, 65_536):
+        raise argparse.ArgumentTypeError("端口必须在 1 到 65535 之间")
+    return port
+
 
 def _runtime_not_configured(*, session_id: str, **_kwargs) -> dict:
     return {
@@ -81,9 +92,11 @@ _prev_nodes: dict[str, str] = {}
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the TARS loopback Agent service")
+    parser = argparse.ArgumentParser(description="Run the TARS Agent service")
     parser.add_argument("--mock", action="store_true", help="use a deterministic no-model backend for integration tests")
     parser.add_argument("--config", default="config/cloud.yaml", help="private cloud deployment YAML")
+    parser.add_argument("--host", default="0.0.0.0", help="HTTP listen address (default: 0.0.0.0)")
+    parser.add_argument("--port", type=_port, default=8080, help="HTTP listen port (default: 8080)")
     parser.add_argument(
         "--log-file",
         default="tars-agent.log",
@@ -105,7 +118,8 @@ def main() -> None:
                           timeout_seconds=config.timeout_seconds, max_retries=config.max_retries,
                           retry_backoff_seconds=config.retry_backoff_seconds)
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8080)
+    logger.info("Agent listening on %s:%d", args.host, args.port)
+    uvicorn.run(app, host=args.host, port=args.port)
 
 
 app = FastAPI(title="TARS Assistant Agent", version=PROTOCOL_VERSION)
@@ -195,7 +209,10 @@ def agent_run(req: dict) -> dict:
         )
     # === END DIAG ===
     try:
-        fixed_response = route_fixed_skill(session_id=req["session_id"], intent=req["intent"])
+        launchable_apps = req.get("launchable_apps") or []
+        fixed_response = route_fixed_skill(
+            session_id=req["session_id"], intent=req["intent"], launchable_apps=launchable_apps,
+        )
         if fixed_response is not None:
             response = _validate_response_for_request(fixed_response, req["session_id"])
             logger.info("agent response session=%s source=fixed actions=%s done=%s observe=%s",
@@ -211,8 +228,11 @@ def agent_run(req: dict) -> dict:
             activity=req.get("activity"),
             observation_note=req.get("observation_note", ""),
             previous_nodes=_prev_nodes.get(req["session_id"], ""),
+            launchable_apps=launchable_apps,
         )
-        _prev_nodes[req["session_id"]] = to_llm_prompt(_diag_nodes)
+        current_nodes = to_llm_prompt(_diag_nodes)
+        if current_nodes:
+            _prev_nodes[req["session_id"]] = current_nodes
         response = _validate_response_for_request(resp, req["session_id"])
         logger.info("agent response session=%s source=llm actions=%s done=%s observe=%s",
                     req["session_id"], [a.get("type") for a in response.get("actions", [])],

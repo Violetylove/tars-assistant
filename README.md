@@ -9,7 +9,7 @@ Python Agent 负责安全决策；云端仅提供 OpenAI-compatible 大模型推
 
 **原生 App -> 本机 Termux Agent -> HTTPS 云端模型 -> Agent 安全校验 -> 原生 App 执行**
 
-Android 默认通过 `http://127.0.0.1:8080` 连接 Agent，也可在设置页配置受信任的 Agent 主机与端口。远程
+Agent 服务默认监听 `0.0.0.0:8080`；Android 默认通过 `http://127.0.0.1:8080` 连接本机 Agent，也可在设置页配置受信任的 Agent 主机与端口。远程
 Agent 会收到任务文本与压缩 UI 摘要；模型 API Key 仍仅保存在 Termux 的私有配置中，绝不放入 Android APK、Git 或云端模型请求以外的地方。
 
 ## 云端配置
@@ -23,6 +23,7 @@ cd ~/tars-assistant
 cp config/cloud.yaml.example config/cloud.yaml
 # 编辑 config/cloud.yaml 后
 ./scripts/deploy_agent.sh              # 推荐：自动建 venv/装依赖/校验配置/启动
+./scripts/deploy_agent.sh --port 8081  # 指定 Agent 监听端口
 ```
 
 `--mock` 仅用于协议联调：`python -m agent.server --mock`。

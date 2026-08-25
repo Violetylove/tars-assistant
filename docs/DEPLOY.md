@@ -80,6 +80,7 @@ chmod +x scripts/deploy_agent.sh
 ./scripts/deploy_agent.sh              # 前台启动（Ctrl+C 停止）
 ./scripts/deploy_agent.sh --background # 后台（nohup，PID 写入 .agent.pid + /health 探活）
 ./scripts/deploy_agent.sh --mock       # 协议联调（无需云端 Key）
+./scripts/deploy_agent.sh --port 8081  # 指定服务监听端口（默认 8080）
 ./scripts/deploy_agent.sh --stop       # 停止后台服务
 ./scripts/deploy_agent.sh --help
 ```
@@ -127,7 +128,7 @@ Agent 正常启动时会以 INFO 记录请求/响应元数据：会话 ID、前�
 
 ## 5. 验收
 
-1. 启动 Agent 后，`GET http://127.0.0.1:8080/health` 返回 `status=ok`。
+1. 启动 Agent 后，`GET http://127.0.0.1:<port>/health` 返回 `status=ok`（默认端口为 8080）。服务默认监听 `0.0.0.0`；远程设备须填写该服务所在主机的实际 IP 或域名，不能填写 `0.0.0.0`。
 2. Android 发送固定技能，确认本机 loopback 与执行白名单正常。
 3. Android 发送非敏感任务，确认 Agent 调云端模型并返回通过 schema 的结果。
 4. 发送、删除、支付等敏感节点仍必须出现 Android 二次确认。

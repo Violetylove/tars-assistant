@@ -78,6 +78,18 @@ def test_task_request_rejects_oversized_observation_note():
     assert validate(req, "task_request")
 
 
+def test_task_request_accepts_user_selected_launchable_apps():
+    req = _load("task_request.json")
+    req["launchable_apps"] = [{"label": "Gmail", "package_name": "com.google.android.gm"}]
+    assert validate(req, "task_request") == []
+
+
+def test_task_request_rejects_invalid_launchable_app_entry():
+    req = _load("task_request.json")
+    req["launchable_apps"] = [{"label": "Gmail"}]
+    assert validate(req, "task_request")
+
+
 # --- agent_response / action ---
 
 def test_agent_response_example_pass():

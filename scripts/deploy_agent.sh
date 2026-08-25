@@ -6,6 +6,7 @@
 #   ./scripts/deploy_agent.sh              前台启动（Ctrl+C 停止）
 #   ./scripts/deploy_agent.sh --background 后台启动（nohup，PID 写到 .agent.pid）
 #   ./scripts/deploy_agent.sh --mock       协议联调模式（无需云端 config/cloud.yaml）
+#   ./scripts/deploy_agent.sh --port 8081  指定监听端口
 #   ./scripts/deploy_agent.sh --stop       停止后台运行的 Agent
 #   ./scripts/deploy_agent.sh --help       显示本帮助
 # =============================================================================
@@ -34,6 +35,7 @@ usage() { cat <<EOF
 用法： ./scripts/deploy_agent.sh [选项]
   --background   后台启动（nohup，PID 记录到 .agent.pid）
   --mock         协议联调模式（不需真实云端 config/cloud.yaml）
+  --port PORT    监听端口（1-65535，默认：8080）
   --stop         停止后台运行的服务
   --help         显示本帮助
 EOF
@@ -45,6 +47,15 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --background) MODE="background" ;;
     --mock)       BACKEND="mock" ;;
+    --port)
+      [ $# -ge 2 ] || die "--port 需要一个端口号"
+      PORT="$2"
+      case "$PORT" in
+        ''|*[!0-9]*) die "端口必须是 1 到 65535 的整数：$PORT" ;;
+      esac
+      [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "端口必须在 1 到 65535 之间：$PORT"
+      shift
+      ;;
     --stop)       MODE="stop" ;;
     -h|--help)    usage; exit 0 ;;
     *) die "未知参数：$1（用 --help 查看用法）" ;;
@@ -109,16 +120,16 @@ stop_agent() {
   exit 0
 }
 
-CMD_ARGS=""
-[ "$BACKEND" = "mock" ] && CMD_ARGS="--mock"
+CMD_ARGS=()
+[ "$BACKEND" = "mock" ] && CMD_ARGS+=("--mock")
 
 [ "$MODE" = "stop" ] && stop_agent
 
 cd "$APP_DIR"
 
 if [ "$MODE" = "background" ]; then
-  info "后台启动 Agent（日志：$LOG，PID 写入：$PIDFILE）"
-  nohup "$PY" -m agent.server $CMD_ARGS --log-file "$LOG" >/dev/null 2>&1 &
+  info "后台启动 Agent（监听 0.0.0.0:$PORT，日志：$LOG，PID 写入：$PIDFILE）"
+  nohup "$PY" -m agent.server "${CMD_ARGS[@]}" --port "$PORT" --log-file "$LOG" >/dev/null 2>&1 &
   PID=$!
   echo "$PID" > "$PIDFILE"
   sleep 2
@@ -133,6 +144,6 @@ if [ "$MODE" = "background" ]; then
     die "Agent 启动失败，请查看日志：$LOG"
   fi
 else
-  info "前台启动 Agent（Ctrl+C 停止）… 日志同时写入 $LOG"
-  exec "$PY" -m agent.server $CMD_ARGS --log-file "$LOG"
+  info "前台启动 Agent（监听 0.0.0.0:$PORT，Ctrl+C 停止）… 日志同时写入 $LOG"
+  exec "$PY" -m agent.server "${CMD_ARGS[@]}" --port "$PORT" --log-file "$LOG"
 fi
