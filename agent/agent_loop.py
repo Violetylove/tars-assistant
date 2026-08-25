@@ -62,7 +62,7 @@ SYSTEM_PROMPT = (
 def extract_last_json(text: str):
     """从模型回复中提取最后一个 JSON 对象（指令在思考之后）。
 
-    DIAG: 与 llm_client.extract_json 找第一个 JSON 不同，这里取最后一个 ——
+    与 llm_client.extract_json 找第一个 JSON 不同，这里取最后一个 ——
     模型回复开头是自然语言思考，指令 JSON 位于末尾。思考文字中可能出现孤立
     的 {}，取最后能稳定命中指令。
     """
@@ -308,13 +308,15 @@ def decide_once(
     ]
 
     for attempt in range(max_retries + 1):
-        raw = llm.complete(messages, temperature=0)
-        # === DIAG (temporary): log the raw model reply (thinking + instruction) ===
         logger.info(
-            "DIAG llm_reply session=%s repr=%r",
-            session_id, raw[:2000],
+            "model input session=%s attempt=%d messages=%r",
+            session_id, attempt + 1, messages,
         )
-        # === END DIAG ===
+        raw = llm.complete(messages, temperature=0)
+        logger.info(
+            "model output session=%s attempt=%d content=%r",
+            session_id, attempt + 1, raw,
+        )
         # Instruction sits after the thinking block; take the last JSON object.
         obj = extract_last_json(raw)
 

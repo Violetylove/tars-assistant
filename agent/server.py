@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
@@ -26,10 +27,16 @@ from agent.agent_loop import decide_once
 from agent.cloud_config import load_cloud_config
 from agent.llm_client import LLMClient
 from agent.skill_router import route_fixed_skill
-from agent.ui_summarizer import summarize_xml, to_llm_prompt, to_window_layers
+from agent.ui_summarizer import summarize_xml, to_llm_prompt
 from agent.ui_diff import render_ui_diff
 
 logger = logging.getLogger("tars.server")
+
+_RAW_UI_LOG_ENV = "TARS_LOG_RAW_UI"
+
+
+def _raw_ui_logging_enabled() -> bool:
+    return os.getenv(_RAW_UI_LOG_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _port(value: str) -> int:
@@ -160,56 +167,19 @@ def agent_run(req: dict) -> dict:
         req["session_id"], req.get("app") or "-", req.get("activity") or "-",
         ui_xml.count("<node"), len(req.get("history") or []),
     )
-    # === DIAG (temporary): expose request content to diagnose occluder handling ===
     diag_xml = req.get("ui_xml") or ""
     logger.info(
-        "DIAG req session=%s intent=%r app=%r activity=%r ui_bytes=%d obs_note=%r has_suggestion=%s has_subject=%s has_body=%s has_recipient=%s",
+        "agent context session=%s intent=%r app=%r activity=%r ui_bytes=%d observation=%r launchable_apps=%d",
         req["session_id"], req.get("intent"), req.get("app"), req.get("activity"),
         len(diag_xml), req.get("observation_note") or "",
-        ("Winter Yuan" in diag_xml) or ("建议" in diag_xml) or ("Suggestion" in diag_xml),
-        ("主题" in diag_xml), ("正文" in diag_xml) or ("撰写" in diag_xml),
-        ("violetylove" in diag_xml),
+        len(req.get("launchable_apps") or []),
     )
-    # DIAG: record the summarised interactive node list the model actually sees
+    if _raw_ui_logging_enabled():
+        logger.warning(
+            "raw ui enabled session=%s app=%s bytes=%d xml=%r",
+            req["session_id"], req.get("app") or "-", len(diag_xml), diag_xml,
+        )
     _diag_nodes = summarize_xml(diag_xml)
-    logger.info(
-        "DIAG nodes session=%s count=%d ids=%s",
-        req["session_id"], len(_diag_nodes),
-        [(n["id"], n["type"], (n.get("text") or "")[:20]) for n in _diag_nodes],
-    )
-    # DIAG: record the exact prompt text handed to the LLM for this round
-    logger.info(
-        "DIAG prompt session=%s text=%r",
-        req["session_id"], to_llm_prompt(_diag_nodes),
-    )
-    # DIAG: expose the window z-layer/region facts fed to the model (merged into the prompt).
-    logger.info(
-        "DIAG window_layers session=%s text=%r",
-        req["session_id"], to_window_layers(diag_xml),
-    )
-    # DIAG: inspect whether the suggestion row / peoplekit list is present and interactive
-    _has_peoplekit = "peoplekit" in diag_xml
-    _has_recycler = "RecyclerView" in diag_xml
-    _sugg_row_text = "Winter Yuan" in diag_xml
-    _has_recycler_id = "peoplekit_autocomplete_results_recyclerview" in diag_xml
-    logger.info(
-        "DIAG ui_xml session=%s has_peoplekit=%s has_recyclerview=%s has_recycler_id=%s has_winteryuan_text=%s",
-        req["session_id"], _has_peoplekit, _has_recycler, _has_recycler_id, _sugg_row_text,
-    )
-    # DIAG: dump the raw XML snippet around the peoplekit / suggestion area, if present
-    _idx = diag_xml.find("peoplekit")
-    if _idx >= 0:
-        _snippet = diag_xml[max(0, _idx - 120): _idx + 900]
-        logger.info(
-            "DIAG ui_xml_peoplekit session=%s snippet=%r",
-            req["session_id"], _snippet,
-        )
-    else:
-        logger.info(
-            "DIAG ui_xml_peoplekit session=%s snippet=(no peoplekit in ui_xml) app=%r ui_bytes=%d",
-            req["session_id"], req.get("app"), len(diag_xml),
-        )
-    # === END DIAG ===
     try:
         launchable_apps = req.get("launchable_apps") or []
         fixed_response = route_fixed_skill(

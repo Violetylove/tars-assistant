@@ -1,6 +1,7 @@
 """阶段 2 单测：ui_summarizer / llm_client / agent_loop / server。"""
 
 import json
+import logging
 
 import pytest
 import requests
@@ -199,6 +200,18 @@ def test_decision_prompt_compacts_recent_action_history():
     assert 'type(node=4,text="' in message
     assert "x" * 90 not in message
     assert '"actions"' not in message
+
+
+def test_decision_logs_complete_model_input_and_output(caplog):
+    llm = MockLLM(script=[lambda: "完整思考过程\n{" + '"type":"done"}' ])
+    with caplog.at_level(logging.INFO, logger="tars.agent_loop"):
+        response = decide_once(llm=llm, session_id="log-check", intent="记录这条意图", ui_xml="")
+    assert response["done"] is True
+    records = "\n".join(record.getMessage() for record in caplog.records)
+    assert "model input session=log-check" in records
+    assert "记录这条意图" in records
+    assert "model output session=log-check" in records
+    assert "完整思考过程" in records
 
 
 def _diff_node(node_id, text="按钮", *, resource_id="", bounds=None, focused=False):
@@ -595,6 +608,24 @@ def test_server_passes_foreground_context_to_decision_backend():
     assert response["done"] is True
     assert captured["app"] == "com.android.settings"
     assert captured["activity"] == "com.android.settings.Settings"
+
+
+def test_server_raw_ui_logging_is_opt_in(monkeypatch, caplog):
+    srv = _fresh_server()
+    monkeypatch.delenv("TARS_LOG_RAW_UI", raising=False)
+    caplog.set_level(logging.INFO, logger="tars.server")
+    request = {
+        "protocol_version": "1.0", "session_id": "raw-ui-log", "intent": "测试",
+        "ui_xml": SIMPLE_XML,
+    }
+    srv.agent_run(request)
+    assert "raw ui enabled" not in caplog.text
+
+    caplog.clear()
+    monkeypatch.setenv("TARS_LOG_RAW_UI", "1")
+    srv.agent_run(request)
+    assert "raw ui enabled session=raw-ui-log" in caplog.text
+    assert "<hierarchy>" in caplog.text
 
 
 def test_server_passes_launchable_apps_to_decision_backend():
