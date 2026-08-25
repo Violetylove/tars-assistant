@@ -31,6 +31,7 @@ android/app/build/
 # Runtime diagnostics
 .runtime/
 .tmp/
+/log/
 *.log
 
 # Local Android debug keystore dir (test artifact)

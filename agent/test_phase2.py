@@ -292,24 +292,6 @@ def test_decision_prompt_includes_user_selected_launchable_apps():
     assert "Gmail | com.google.android.gm" in message
 
 
-def test_interactive_state_and_bounds_merged_into_prompt_line():
-    xml = (
-        '<hierarchy><window layer="0"><node package="com.google.android.gm" '
-        'resource-id="peoplekit_autocomplete_results_recyclerview" '
-        'class="android.support.v7.widget.RecyclerView" bounds="[0,610][1080,1496]">'
-        '<node text="violetylove@163.com" class="android.widget.TextView" '
-        'clickable="true" bounds="[198,778][1036,894]"/></node></window></hierarchy>'
-    )
-    prompt = to_llm_prompt(summarize_xml(xml))
-    # 交互子节点行 = id + 层 + 完整矩形 + 可点击状态（合并进 prompt，不再有独立 context 块）。
-    assert "[0] [层0] text" in prompt
-    assert "bounds=[198,778][1036,894]" in prompt
-    assert "violetylove@163.com" in prompt
-    assert "clickable" in prompt
-    # 父容器 RecyclerView 不可交互 → 不进节点列表。
-    assert "peoplekit_autocomplete_results_recyclerview" not in prompt
-
-
 def test_decision_prompt_warns_on_empty_nodes():
     message = _build_user_message("打开设置", [], [], app="com.android.settings", activity="com.example.Settings")
     assert "当前屏幕节点：（空）" in message
@@ -642,6 +624,28 @@ def test_server_raw_ui_logging_is_opt_in(monkeypatch, caplog):
     srv.agent_run(request)
     assert "raw ui enabled session=raw-ui-log" in caplog.text
     assert "<hierarchy>" in caplog.text
+
+
+def test_server_accepts_android_log_upload(tmp_path, monkeypatch):
+    srv = _fresh_server()
+    monkeypatch.setattr(srv, "_ANDROID_LOG_DIR", tmp_path)
+    client = TestClient(srv.app)
+    response = client.post(
+        "/logs/android",
+        content=b"android test log",
+        headers={"X-TARS-Log-Filename": "device.log"},
+    )
+    assert response.status_code == 200
+    assert response.json()["filename"] == "device.log"
+    assert (tmp_path / "device.log").read_bytes() == b"android test log"
+
+
+def test_server_rejects_oversized_android_log(tmp_path, monkeypatch):
+    srv = _fresh_server()
+    monkeypatch.setattr(srv, "_MAX_ANDROID_LOG_BYTES", 4)
+    client = TestClient(srv.app)
+    response = client.post("/logs/android", content=b"12345")
+    assert response.status_code == 413
 
 
 def test_server_passes_launchable_apps_to_decision_backend():

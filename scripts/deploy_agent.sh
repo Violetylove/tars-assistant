@@ -20,7 +20,7 @@ PIP="$VENV_BIN/pip"
 REQ="$APP_DIR/requirements.txt"
 CONFIG="$APP_DIR/config/cloud.yaml"
 EXAMPLE="$APP_DIR/config/cloud.yaml.example"
-LOG="$APP_DIR/tars-agent.log"
+LOG="$APP_DIR/log/agent/agent.log"
 PIDFILE="$APP_DIR/.agent.pid"
 PORT=8080
 

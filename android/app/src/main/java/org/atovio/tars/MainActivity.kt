@@ -31,6 +31,7 @@ import java.util.concurrent.Executors
 class MainActivity : Activity() {
     private val executor = Executors.newSingleThreadExecutor()
     private lateinit var connectionStatus: TextView
+    private lateinit var clearButton: Button
     private lateinit var terminateButton: Button
     private lateinit var intentInput: EditText
     private lateinit var send: Button
@@ -163,6 +164,12 @@ class MainActivity : Activity() {
             setTextColor(Color.rgb(185, 28, 28))
             setOnClickListener { terminateTask() }
         }
+        clearButton = Button(this@MainActivity).apply {
+            text = "清除记录"
+            isAllCaps = false
+            setOnClickListener { confirmClearRecords() }
+        }
+        addView(clearButton, LinearLayout.LayoutParams(dp(88), dp(48)))
         addView(terminateButton, LinearLayout.LayoutParams(dp(92), dp(48)))
         addView(TextView(this@MainActivity).apply {
             contentDescription = "打开设置"
@@ -405,10 +412,54 @@ class MainActivity : Activity() {
             timelineEntries += TimelineEntry(message, fromUser)
             val row = LinearLayout(this).apply { gravity = if (fromUser) Gravity.END else Gravity.START }
             val bubble = if (fromUser) userBubble(message) else logBubble(message)
+            if (fromUser) {
+                bubble.setOnLongClickListener {
+                    showUserMessageActions(message)
+                    true
+                }
+            }
             row.addView(bubble)
             timeline.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
             conversationScroll.post { conversationScroll.fullScroll(View.FOCUS_DOWN) }
+            AndroidLogStore.append(this, "${if (fromUser) "intent" else "timeline"}: $message")
         }
+    }
+
+    private fun showUserMessageActions(message: String) {
+        AlertDialog.Builder(this)
+            .setItems(arrayOf("复制", "重新发送")) { _, which ->
+                when (which) {
+                    0 -> {
+                        val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("TARS 意图", message))
+                        setConnectionStatus("已复制意图")
+                    }
+                    1 -> {
+                        intentInput.setText(message)
+                        intentInput.setSelection(intentInput.length())
+                        submitIntent()
+                    }
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun confirmClearRecords() {
+        AlertDialog.Builder(this)
+            .setTitle("清除记录")
+            .setMessage("确定清除当前对话记录吗？正在运行的任务不会被终止。")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("清除") { _, _ -> clearRecords() }
+            .show()
+    }
+
+    private fun clearRecords() {
+        timelineEntries.clear()
+        timeline.removeAllViews()
+        lastReadinessSignature = null
+        setConnectionStatus(if (requestInFlight) "任务进行中" else "记录已清除")
+        AndroidLogStore.append(this, "timeline cleared")
     }
 
     private fun userBubble(message: String): TextView = messageBubble(

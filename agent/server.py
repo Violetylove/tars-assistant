@@ -19,7 +19,7 @@ import re
 import xml.etree.ElementTree as ET
 from typing import Callable
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 
 from bridge.schemas import PROTOCOL_VERSION
 from bridge.validate import validate
@@ -108,8 +108,8 @@ def main() -> None:
     parser.add_argument("--port", type=_port, default=8080, help="HTTP listen port (default: 8080)")
     parser.add_argument(
         "--log-file",
-        default="tars-agent.log",
-        help="write Agent logs to this UTF-8 file as well as stderr (default: tars-agent.log)",
+        default="log/agent/agent.log",
+        help="write Agent logs to this UTF-8 file as well as stderr (default: log/agent/agent.log)",
     )
     args = parser.parse_args()
     log_format = "%(asctime)s %(levelname)s %(name)s %(message)s"
@@ -133,10 +133,31 @@ def main() -> None:
 
 app = FastAPI(title="TARS Assistant Agent", version=PROTOCOL_VERSION)
 
+_MAX_ANDROID_LOG_BYTES = 10 * 1024 * 1024
+_ANDROID_LOG_DIR = Path(__file__).resolve().parents[1] / "log" / "android"
+
 
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "protocol_version": PROTOCOL_VERSION}
+
+
+@app.post("/logs/android")
+async def upload_android_log(
+    request: Request,
+    filename: str = Header(default="android.log", alias="X-TARS-Log-Filename"),
+) -> dict:
+    """Store an Android diagnostic log below the project log directory."""
+    body = await request.body()
+    if len(body) > _MAX_ANDROID_LOG_BYTES:
+        raise HTTPException(status_code=413, detail="Android 日志文件过大")
+    safe_name = Path(filename or "android.log").name
+    if safe_name in {"", ".", ".."}:
+        safe_name = "android.log"
+    _ANDROID_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    (_ANDROID_LOG_DIR / safe_name).write_bytes(body)
+    logger.info("Android log uploaded filename=%s bytes=%d", safe_name, len(body))
+    return {"status": "ok", "filename": safe_name, "bytes": len(body)}
 
 
 def _validate_response_for_request(resp: dict, session_id: str) -> dict:

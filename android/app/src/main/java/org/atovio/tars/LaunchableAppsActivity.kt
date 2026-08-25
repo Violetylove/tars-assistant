@@ -29,13 +29,18 @@ class LaunchableAppsActivity : Activity() {
         content.addView(header())
         content.addView(sectionTitle("允许启动的应用"))
         content.addView(description())
-        content.addView(button("刷新应用列表") { refreshApps() })
+        val actionRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        actionRow.addView(button("刷新应用列表") { refreshApps() }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        actionRow.addView(button("保存允许启动的应用") { saveApps() }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(8) })
+        content.addView(actionRow)
         appsContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         content.addView(appsContainer)
-        content.addView(button("保存允许启动的应用") { saveApps() })
         status = TextView(this).apply {
             setTextColor(Color.rgb(71, 85, 105))
-            setPadding(0, dp(12), 0, 0)
+            setPadding(0, dp(8), 0, 0)
         }
         content.addView(status)
         val scrollView = ScrollView(this).apply {

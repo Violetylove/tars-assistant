@@ -73,6 +73,9 @@ class SettingsActivity : Activity() {
         }
         content.addView(status)
 
+        content.addView(sectionTitle("日志与诊断"))
+        content.addView(button("发送 Android 日志") { uploadAndroidLog() })
+
         content.addView(sectionTitle("应用启动"))
         launchAppsButton = button("允许启动的应用") {
             startActivity(Intent(this, LaunchableAppsActivity::class.java))
@@ -222,6 +225,23 @@ class SettingsActivity : Activity() {
 
     private fun refreshServiceState() {
         floatingVoiceButton.text = if (TarsAccessibilityService.instance?.isFloatingVoiceVisible == true) "停用悬浮语音" else "启用悬浮语音"
+    }
+
+    private fun uploadAndroidLog() {
+        val logFile = AndroidLogStore.file(this)
+        if (!logFile.isFile) {
+            showStatus("暂无 Android 日志")
+            return
+        }
+        showStatus("正在发送 Android 日志…")
+        Thread {
+            try {
+                AgentClient(this).uploadAndroidLog(logFile)
+                runOnUiThread { showStatus("Android 日志已发送到 Agent") }
+            } catch (error: Exception) {
+                runOnUiThread { showStatus("日志发送失败：${error.message ?: "未知错误"}") }
+            }
+        }.start()
     }
 
     private fun showStatus(message: String) { status.text = message }

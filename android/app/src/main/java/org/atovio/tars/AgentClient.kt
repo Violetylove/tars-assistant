@@ -33,6 +33,13 @@ class AgentClient(context: android.content.Context) {
         }
     }
 
+    fun uploadAndroidLog(file: java.io.File): String {
+        require(file.isFile) { "Android 日志文件不存在" }
+        val (status, body) = requestBytes("POST", "/logs/android", file.readBytes(), file.name)
+        if (status !in 200..299) throw IllegalStateException("Agent HTTP $status: $body")
+        return body
+    }
+
     private fun request(
         method: String,
         path: String,
@@ -51,6 +58,29 @@ class AgentClient(context: android.content.Context) {
                 doOutput = true
                 outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
             }
+        }
+        activeConnection = conn
+        return try {
+            val status = conn.responseCode
+            val stream = if (status >= 400) conn.errorStream else conn.inputStream
+            status to (stream?.bufferedReader()?.use { it.readText() } ?: "")
+        } finally {
+            if (activeConnection === conn) activeConnection = null
+            conn.disconnect()
+        }
+    }
+
+    private fun requestBytes(method: String, path: String, payload: ByteArray, filename: String): Pair<Int, String> {
+        val url = URL(baseUrl.trimEnd('/') + path)
+        val conn = ((if (isLoopback) url.openConnection(Proxy.NO_PROXY) else url.openConnection()) as HttpURLConnection).apply {
+            requestMethod = method
+            connectTimeout = 5_000
+            readTimeout = settings.modelRequestTimeoutMs
+            setRequestProperty("Content-Type", "text/plain; charset=utf-8")
+            setRequestProperty("X-TARS-Log-Filename", filename)
+            doInput = true
+            doOutput = true
+            outputStream.use { it.write(payload) }
         }
         activeConnection = conn
         return try {
