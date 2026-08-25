@@ -66,6 +66,7 @@ class SettingsActivity : Activity() {
             refreshLaunchAppsButton()
             showStatus("已恢复安全默认值")
         })
+
         status = TextView(this).apply {
             setTextColor(Color.rgb(71, 85, 105))
             setPadding(0, dp(12), 0, 0)
