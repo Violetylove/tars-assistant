@@ -8,11 +8,13 @@ import android.view.accessibility.AccessibilityWindowInfo
 
 class TarsAccessibilityService : AccessibilityService() {
     private var floatingVoiceOverlay: FloatingVoiceOverlay? = null
+    private var actionConfirmationOverlay: ActionConfirmationOverlay? = null
     @Volatile private var foregroundPackage: String? = null
     @Volatile private var foregroundActivity: String? = null
     @Volatile private var observationVersion: Long = 0L
     override fun onServiceConnected() {
         instance = this
+        actionConfirmationOverlay = ActionConfirmationOverlay(this)
         sendBroadcast(android.content.Intent(ACTION_CONNECTED).setPackage(packageName))
     }
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -41,6 +43,8 @@ class TarsAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         floatingVoiceOverlay?.hide()
         floatingVoiceOverlay = null
+        actionConfirmationOverlay?.dismiss()
+        actionConfirmationOverlay = null
         if (instance === this) instance = null
         super.onDestroy()
     }
@@ -244,6 +248,49 @@ class TarsAccessibilityService : AccessibilityService() {
         sessionId: String = "-",
     ): ActionExecutor.ExecutionSummary =
         ActionExecutor(this, confirm, sessionId = sessionId).execute(actions)
+
+    fun confirmAction(action: AgentAction): Boolean =
+        actionConfirmationOverlay?.confirm(actionConfirmationDescription(action)) == true
+
+    private fun actionConfirmationDescription(action: AgentAction): String {
+        val node = action.targetNodeId?.let { id -> collectVisibleNodes().map { it.first }.take(60).getOrNull(id) }
+        val nodeType = node?.let(::confirmationNodeType) ?: "控件"
+        val nodeText = node?.let(::confirmationNodeText)?.ifBlank { "无文本" } ?: "无文本"
+        return when (action.type) {
+            "click" -> "TARS即将操作：点击${nodeType}[$nodeText]。"
+            "type" -> "TARS即将操作：向${nodeType}[$nodeText]输入[${action.text.orEmpty()}]。"
+            "swipe" -> "TARS即将操作：滑动当前界面。"
+            "launch" -> "TARS即将操作：启动${action.packageName.orEmpty()}。"
+            "back" -> "TARS即将操作：返回上一页。"
+            "home" -> "TARS即将操作：返回桌面。"
+            else -> "TARS即将操作：${action.type}当前界面。"
+        }
+    }
+
+    private fun confirmationNodeType(node: AccessibilityNodeInfo): String {
+        val className = node.className?.toString().orEmpty().lowercase()
+        return when {
+            className.contains("edittext") -> "输入框"
+            className.contains("imagebutton") -> "图片按钮"
+            className.contains("button") || node.isClickable -> "按钮"
+            className.contains("textview") -> "文本"
+            else -> "控件"
+        }
+    }
+
+    private fun confirmationNodeText(node: AccessibilityNodeInfo): String {
+        val labels = linkedSetOf<String>()
+        fun visit(current: AccessibilityNodeInfo?) {
+            if (current == null || labels.size >= 3) return
+            listOf(current.text?.toString(), current.contentDescription?.toString())
+                .map { it.orEmpty().replace("\n", " ").trim() }
+                .filter { it.isNotBlank() }
+                .forEach { labels += it }
+            for (index in 0 until current.childCount) visit(current.getChild(index))
+        }
+        visit(node)
+        return labels.joinToString(" / ").take(80)
+    }
 
     fun toggleFloatingVoice(): Boolean {
         floatingVoiceOverlay?.let { it.hide(); floatingVoiceOverlay = null; return false }

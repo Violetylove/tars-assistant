@@ -115,7 +115,7 @@ Android 使用 `AccessibilityNodeInfo` 遍历并序列化 UI XML；`uiautomator 
 
 1. **协议校验**：Agent 和 Android 均校验 schema、`protocol_version`、`session_id`、历史长度和动作数量。
 2. **动作白名单**：只允许 `click/type/swipe/back/home/launch/wait/reply/done`；`launch` 仅允许本机仍安装、用户在设置页勾选且随本轮请求携带的包名，禁止任意 Intent、组件、URI 和 shell 参数。Agent 和 Android 都会拒绝目录外包名。
-3. **敏感操作确认**：发送、删除、支付、转账等目标即使模型未标记，也由 Python 和 Android 按当前节点文本再次判定并要求用户确认。
+3. **敏感操作确认**：发送、删除、支付、转账等目标即使模型未标记，也由 Python 和 Android 按当前节点文本再次判定并要求用户确认。确认浮层由无障碍服务以 `TYPE_ACCESSIBILITY_OVERLAY` 显示在当前前台应用之上，文案使用动作类型、控件类型和节点文本，不暴露内部节点序号。
 4. **失败即收敛**：动作被拒绝、取消、失败或无法观察到新鲜 UI 时，停止本轮后续动作和观察，不把未执行动作写入历史。
 5. **权限隔离**：Shizuku 只暴露参数受限的输入/滑动方法；云端不可直接访问设备。
 6. **日志分层**：Agent 审计日志不记录原始 UI XML；Android 本地诊断日志记录同一 `session_id` 下每轮采集的原始 XML、Agent 返回的完整动作及其解析到的实际执行节点，仅在用户主动选择“发送 Android 日志”时上传。两类日志均不得记录凭据。

@@ -25,7 +25,6 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
@@ -306,7 +305,7 @@ class MainActivity : Activity() {
                 )
                 noteForNextRound = ""
                 if (response.reply.isNotBlank()) appendLog(response.reply)
-                val execution = service.execute(response.actions, ::confirmAction, sessionId)
+                val execution = service.execute(response.actions, service::confirmAction, sessionId)
                 execution.messages.forEach(::appendLog)
                 if (cancelRequested) {
                     finishCancelledTask()
@@ -612,29 +611,6 @@ class MainActivity : Activity() {
     private fun setConnectionStatus(message: String) { if (::connectionStatus.isInitialized) connectionStatus.text = message }
 
     private fun newSessionId(): String = java.util.UUID.randomUUID().toString().replace("-", "").take(16)
-
-    private fun confirmAction(action: AgentAction): Boolean {
-        val approved = BooleanArray(1)
-        val completion = CountDownLatch(1)
-        runOnUiThread {
-            AlertDialog.Builder(this).setTitle("确认 TARS 操作").setMessage(actionDescription(action))
-                .setNegativeButton("取消") { _, _ -> completion.countDown() }
-                .setPositiveButton("确认") { _, _ -> approved[0] = true; completion.countDown() }
-                .setOnCancelListener { completion.countDown() }.show()
-        }
-        completion.await()
-        return approved[0]
-    }
-
-    private fun actionDescription(action: AgentAction): String = when (action.type) {
-        "click" -> "点击屏幕节点 #${action.targetNodeId}"
-        "type" -> "向节点 #${action.targetNodeId} 输入：${action.text.orEmpty()}"
-        "swipe" -> "在屏幕上滑动"
-        "back" -> "返回上一页"
-        "home" -> "返回桌面"
-        "launch" -> "启动应用：${action.packageName.orEmpty()}"
-        else -> "执行操作：${action.type}"
-    }
 
     private fun hasMicrophonePermission(): Boolean = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     private fun roundedBackground(fill: Int, stroke: Int, radiusDp: Int): GradientDrawable = GradientDrawable().apply { setColor(fill); setStroke(dp(1), stroke); cornerRadius = dp(radiusDp).toFloat() }
