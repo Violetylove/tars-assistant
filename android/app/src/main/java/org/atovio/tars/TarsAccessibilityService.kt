@@ -12,6 +12,7 @@ class TarsAccessibilityService : AccessibilityService() {
     @Volatile private var foregroundPackage: String? = null
     @Volatile private var foregroundActivity: String? = null
     @Volatile private var observationVersion: Long = 0L
+    @Volatile private var latestEventTrace: String = "none"
     override fun onServiceConnected() {
         instance = this
         actionConfirmationOverlay = ActionConfirmationOverlay(this)
@@ -34,7 +35,10 @@ class TarsAccessibilityService : AccessibilityService() {
                 AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
                 AccessibilityEvent.TYPE_VIEW_FOCUSED,
                 AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                AccessibilityEvent.TYPE_VIEW_SELECTED -> observationVersion++
+                AccessibilityEvent.TYPE_VIEW_SELECTED -> {
+                    observationVersion++
+                    latestEventTrace = eventTrace(event)
+                }
             }
         }
     }
@@ -81,15 +85,7 @@ class TarsAccessibilityService : AccessibilityService() {
         val facts = mutableListOf<WindowFact>()
         try {
             windows?.forEach { w ->
-                val label = when (w.type) {
-                    AccessibilityWindowInfo.TYPE_APPLICATION -> "application"
-                    AccessibilityWindowInfo.TYPE_INPUT_METHOD -> "input_method"
-                    AccessibilityWindowInfo.TYPE_SYSTEM -> "system"
-                    AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY -> "accessibility_overlay"
-                    AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER -> "split_screen_divider"
-                    AccessibilityWindowInfo.TYPE_MAGNIFICATION_OVERLAY -> "magnification_overlay"
-                    else -> "type_${w.type}"
-                }
+                val label = windowTypeLabel(w.type)
                 val r = android.graphics.Rect().also { w.getBoundsInScreen(it) }
                 facts += WindowFact(label, w.layer, listOf(r.left, r.top, r.right, r.bottom))
             }
@@ -217,11 +213,30 @@ class TarsAccessibilityService : AccessibilityService() {
 
     fun currentObservationVersion(): Long = observationVersion
 
+    /**
+     * Structural capture evidence for the Android diagnostic log. It intentionally excludes
+     * node text: the paired raw XML capture remains the content-level diagnostic record.
+     */
+    fun captureSourceState(): String {
+        val windows = try { windows.orEmpty() } catch (_: Throwable) { emptyList() }
+        val windowState = windows.joinToString(prefix = "[", postfix = "]") { window ->
+            "{id=${window.id},type=${windowTypeLabel(window.type)},layer=${window.layer}," +
+                "focused=${window.isFocused},root=${nodeTrace(window.root)}}"
+        }
+        return "windows=$windowState active_root=${nodeTrace(rootInActiveWindow)} latest_event=$latestEventTrace"
+    }
+
     /** Wait for a populated foreground tree before allowing another Agent request. */
-    fun awaitStableUi(timeoutMs: Long): String? {
+    fun awaitStableUi(timeoutMs: Long, onCaptureStateChanged: (String) -> Unit = {}): String? {
         val deadline = android.os.SystemClock.elapsedRealtime() + timeoutMs
         var stableCandidate: String? = null
+        var lastCaptureState = ""
         while (android.os.SystemClock.elapsedRealtime() < deadline) {
+            val captureState = captureSourceState()
+            if (captureState != lastCaptureState) {
+                onCaptureStateChanged(captureState)
+                lastCaptureState = captureState
+            }
             val uiXml = currentUiXml()
             val packageName = currentAppPackage()
             val usable = uiXml.isNotBlank() && packageName != null &&
@@ -299,6 +314,43 @@ class TarsAccessibilityService : AccessibilityService() {
     } catch (_: InterruptedException) {
         Thread.currentThread().interrupt()
         false
+    }
+
+    private fun eventTrace(event: AccessibilityEvent): String = try {
+        "type=${eventTypeLabel(event.eventType)},window=${event.windowId},pkg=${event.packageName?.toString().orEmpty()}," +
+            "class=${event.className?.toString().orEmpty()},source=${nodeTrace(event.source)}"
+    } catch (_: Throwable) {
+        "type=${eventTypeLabel(event.eventType)},window=${event.windowId},source=unavailable"
+    }
+
+    private fun nodeTrace(node: AccessibilityNodeInfo?): String {
+        if (node == null) return "none"
+        return try {
+            val bounds = android.graphics.Rect().also { node.getBoundsInScreen(it) }
+            "pkg=${node.packageName?.toString().orEmpty()},class=${node.className?.toString().orEmpty()},enabled=${node.isEnabled}," +
+                "children=${node.childCount},bounds=[${bounds.left},${bounds.top}][${bounds.right},${bounds.bottom}]"
+        } catch (_: Throwable) {
+            "unavailable"
+        }
+    }
+
+    private fun windowTypeLabel(type: Int): String = when (type) {
+        AccessibilityWindowInfo.TYPE_APPLICATION -> "application"
+        AccessibilityWindowInfo.TYPE_INPUT_METHOD -> "input_method"
+        AccessibilityWindowInfo.TYPE_SYSTEM -> "system"
+        AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY -> "accessibility_overlay"
+        AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER -> "split_screen_divider"
+        AccessibilityWindowInfo.TYPE_MAGNIFICATION_OVERLAY -> "magnification_overlay"
+        else -> "type_$type"
+    }
+
+    private fun eventTypeLabel(type: Int): String = when (type) {
+        AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> "window_state_changed"
+        AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> "window_content_changed"
+        AccessibilityEvent.TYPE_VIEW_FOCUSED -> "view_focused"
+        AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> "view_text_changed"
+        AccessibilityEvent.TYPE_VIEW_SELECTED -> "view_selected"
+        else -> "type_$type"
     }
 
     fun execute(

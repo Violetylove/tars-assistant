@@ -129,8 +129,9 @@ Android 使用 `AccessibilityNodeInfo` 序列化原始 XML；`uiautomator dump` 
    内部节点编号。
 4. **失败收敛**：拒绝、取消、执行失败或 UI 不新鲜时不执行后续动作，也不把未执行动作写进 history。
 5. **权限隔离**：Shizuku 只暴露参数受限的输入/滑动；云端无法直接访问设备。
-6. **日志分层**：Agent 审计日志不保存原始 XML；Android 诊断日志保存 XML、Agent 动作和实际节点，
-   仅在用户主动上传时发送到 Agent。
+6. **日志分层**：Agent 审计日志不保存原始 XML；Android 诊断日志保存 XML、Agent 动作和实际节点。
+   有效树缺失时还记录窗口根与事件来源的结构元数据，且仅在状态变化时追加；日志仅在用户主动上传
+   时发送到 Agent。
 
 ## 可靠性与当前范围
 

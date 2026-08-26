@@ -44,6 +44,8 @@ App 在本地等待稳定有效树，超时则安全停止，不复用旧节点�
 
 - Android 私有诊断日志：`files/log/android.log`。同一任务使用 16 位十六进制 session ID，记录
   每轮原始 XML、Agent 响应、执行动作和实际解析节点。
+- 若有效树缺失，日志还会记录 `getWindows()`、`rootInActiveWindow` 和最后一个关键无障碍事件的
+  结构元数据；等待期间仅在来源状态变化时追加，供定位窗口根、事件时序或应用未暴露语义树的原因。
 - 设置页的“发送 Android 日志”上传该文件至 Agent 的 `log/android/`；Agent 审计日志位于
   `log/agent/agent.log`，不保存原始 XML。
 - 联调应至少覆盖：服务未就绪提示、固定技能 `launch`、非敏感多轮动作、敏感确认取消/确认、

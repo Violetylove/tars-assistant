@@ -293,11 +293,17 @@ class MainActivity : Activity() {
                         append(rawUiXml.toByteArray(Charsets.UTF_8).size)
                         append(" raw_ui_xml_begin\n")
                         append(rawUiXml)
-                        append("\nraw_ui_xml_end")
+                        append("\nraw_ui_xml_end\ncapture_sources=")
+                        append(service.captureSourceState())
                     })
                     val stableUiXml = service.awaitStableUi(
                         runtime.observationTimeoutMs + runtime.newAppGraceMs,
-                    )
+                    ) { state ->
+                        AndroidLogStore.append(
+                            this,
+                            "session=$sessionId round=${round + 1} capture_sources_changed $state",
+                        )
+                    }
                     if (stableUiXml == null) {
                         appendLog("未获取到有效无障碍界面，已安全停止任务。")
                         AndroidLogStore.append(
