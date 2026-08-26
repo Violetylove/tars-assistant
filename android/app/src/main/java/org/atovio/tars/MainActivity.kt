@@ -281,8 +281,8 @@ class MainActivity : Activity() {
                     finishCancelledTask()
                     return
                 }
-                var uiXml = service.currentUiXml()
-                if (uiXml.isBlank()) {
+                var snapshot = service.captureUiSnapshot()
+                if (snapshot == null) {
                     val rawUiXml = service.currentDiagnosticUiXml()
                     val currentForeground = service.currentAppPackage() ?: UNKNOWN_FOREGROUND
                     appendLog("当前界面尚未提供有效无障碍树，正在本地等待加载。")
@@ -296,7 +296,7 @@ class MainActivity : Activity() {
                         append("\nraw_ui_xml_end\ncapture_sources=")
                         append(service.captureSourceState())
                     })
-                    val stableUiXml = service.awaitStableUi(
+                    snapshot = service.awaitStableUi(
                         runtime.observationTimeoutMs + runtime.newAppGraceMs,
                     ) { state ->
                         AndroidLogStore.append(
@@ -304,7 +304,7 @@ class MainActivity : Activity() {
                             "session=$sessionId round=${round + 1} capture_sources_changed $state",
                         )
                     }
-                    if (stableUiXml == null) {
+                    if (snapshot == null) {
                         appendLog("未获取到有效无障碍界面，已安全停止任务。")
                         AndroidLogStore.append(
                             this,
@@ -313,8 +313,8 @@ class MainActivity : Activity() {
                         reachedRoundLimit = false
                         break
                     }
-                    uiXml = stableUiXml
                 }
+                val uiXml = snapshot.xml
                 val observationVersion = service.currentObservationVersion()
                 val foreground = service.currentAppPackage() ?: UNKNOWN_FOREGROUND
                 appendLog("第 ${round + 1} 轮，前台应用：$foreground")
@@ -338,7 +338,12 @@ class MainActivity : Activity() {
                 )
                 noteForNextRound = ""
                 if (response.reply.isNotBlank()) appendLog(response.reply)
-                val execution = service.execute(response.actions, service::confirmAction, sessionId)
+                val execution = service.execute(
+                    response.actions,
+                    { action -> service.confirmAction(action, snapshot) },
+                    snapshot,
+                    sessionId,
+                )
                 execution.messages.forEach(::appendLog)
                 if (cancelRequested) {
                     finishCancelledTask()

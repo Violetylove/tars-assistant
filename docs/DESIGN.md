@@ -108,14 +108,17 @@ Android 使用 `AccessibilityNodeInfo` 序列化原始 XML；`uiautomator dump` 
 标记。动作 ID 只属于可交互节点；Android 与 Python 必须采用相同筛选和排序规则。
 
 采集支持多应用窗口层。`getWindows()` 的应用窗口为空骨架或无可访问内容时不能视为有效树；此时
-回退 `rootInActiveWindow`。空骨架仅写入 Android 本地诊断日志，绝不作为 `/agent/run` 的 UI XML。
+回退 `rootInActiveWindow`；两者均为空骨架时，再回退到最近一次窗口级无障碍事件的有效
+`event.source`。事件回退只缓存 `TYPE_WINDOW_STATE_CHANGED` 和 `TYPE_WINDOW_CONTENT_CHANGED`，
+不会使用焦点或文本变化事件中的局部节点。空骨架仅写入 Android 本地诊断日志，绝不作为
+`/agent/run` 的 UI XML。
 动作后进入下一轮前必须同时满足：
 
 1. 树包含可访问内容，且 XML 与当前前台包名一致。
 2. 前台包名或 XML 相对动作前发生变化。
 3. 同一新鲜 XML 连续采集两次一致。
 
-无障碍事件只触发重新采样，不能单独证明 UI 已更新。新启动应用的无障碍树为空时，App 在本地的
+无障碍事件只触发重新采样，不能单独证明 UI 已更新；事件来源只作为窗口根失效时的回退。新启动应用的无障碍树为空时，App 在本地的
 受限等待窗口内重采稳定树；超时则记录拒绝采集并安全停止，不使用陈旧节点，也不让模型对空树
 反复输出 `wait`。
 

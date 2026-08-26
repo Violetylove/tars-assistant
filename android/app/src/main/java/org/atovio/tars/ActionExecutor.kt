@@ -11,6 +11,7 @@ class ActionExecutor(
     private val service: AccessibilityService,
     private val confirm: (AgentAction) -> Boolean,
     private val shizuku: ShizukuGateway = ShizukuGateway(),
+    private val snapshotNodes: List<AccessibilityNodeInfo>? = null,
     private val sessionId: String = "-",
 ) {
     data class ExecutionSummary(val messages: List<String>, val completed: Boolean)
@@ -142,7 +143,7 @@ class ActionExecutor(
         // Multi-layer: use the same visible-window collection in the SAME tree order as the
         // summarizer (per-window pre-order, windows in z-order), so IDs match without a
         // re-sort. collectVisibleNodes returns exactly this order.
-        val visible = TarsAccessibilityService.instance?.collectVisibleNodes()
+        val visible = snapshotNodes ?: TarsAccessibilityService.instance?.collectVisibleNodes()
             ?.map { it.first }.orEmpty()
         // Must mirror agent.ui_summarizer.MAX_NODES, because IDs are post-truncation summary IDs.
         return visible.take(60).getOrNull(id)

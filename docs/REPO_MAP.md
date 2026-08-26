@@ -35,7 +35,7 @@ MainActivity / 触发器
 | `MainActivity.kt` | 对话 UI、任务循环、状态检查、终止、history、Android 日志写入 | 不在此做 UI 摘要或模型决策 |
 | `SettingsActivity.kt` | 权限入口、运行参数、日志上传、应用列表入口 | 配置规则仍归 `RuntimeSettings` |
 | `LaunchableAppsActivity.kt` / `LaunchableApps.kt` | 枚举、刷新、勾选和校验 launcher 应用 | 保存前后均验证应用仍安装 |
-| `TarsAccessibilityService.kt` | 多窗口采集、前台上下文、空树回退、稳定 UI 等待 | 空骨架只供本地诊断，不能进入 Agent 请求；节点筛选与排序必须和 Python 对齐 |
+| `TarsAccessibilityService.kt` | 多窗口采集、事件根回退、前台上下文、稳定 UI 等待、`UiSnapshot` | 空骨架只供本地诊断，不能进入 Agent 请求；同一快照的节点顺序必须和 Python 对齐 |
 | `ActionExecutor.kt` | 动作白名单、节点匹配、输入解析、敏感确认 | 动作/敏感语义改动须同步 Python 和 schema |
 | `ActionConfirmationOverlay.kt` | 前台无障碍敏感确认浮层 | 不泄露内部节点编号 |
 | `AgentClient.kt` | `/health`、`/agent/run`、取消连接、日志上传、HTTP 诊断 | 校验响应 session ID |
