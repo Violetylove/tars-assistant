@@ -1,44 +1,59 @@
 # TARS Assistant
 
-原生 Android App + Termux Python Agent 的 AI 手机助手。Android 负责感知与受限动作执行；项目自研
-Python Agent 负责安全决策；云端仅提供 OpenAI-compatible 大模型推理。
+基于原生 Android App、Termux Python Agent 与云端 OpenAI-compatible 模型的 AI 手机助手。Android
+采集无障碍 UI 并执行受限动作；Python Agent 负责 UI 摘要、安全决策与 schema 校验；云端只提供
+推理，不直接访问设备。
 
-云端模式会将任务文本和 Agent 压缩后的 UI 摘要发送给您配置的模型服务商；请只在可接受该数据处理边界时启用。
+启用云端模式会发送用户任务文本及压缩 UI 摘要。请仅在接受目标服务商数据处理边界时使用。
 
 ## 架构
 
-**原生 App -> 本机 Termux Agent -> HTTPS 云端模型 -> Agent 安全校验 -> 原生 App 执行**
+```text
+Android App -> HTTP Agent -> HTTPS 云端模型
+     ^            |
+     +-- 已校验的受限动作 --+
+```
 
-Agent 服务默认监听 `0.0.0.0:8080`；Android 默认通过 `http://127.0.0.1:8080` 连接本机 Agent，也可在设置页配置受信任的 Agent 主机与端口。远程
-Agent 会收到任务文本与压缩 UI 摘要；模型 API Key 仍仅保存在 Termux 的私有配置中，绝不放入 Android APK、Git 或云端模型请求以外的地方。
+Agent 默认监听 `0.0.0.0:8080`。Android 默认连接同机 `http://127.0.0.1:8080`，也可在设置页配置
+受信任远程 Agent 的实际 IP、域名及端口。云端 API Key 只保存在 Agent 主机的私有
+`config/cloud.yaml`，不进入 Android APK 或 Git。
 
-## 云端配置
-
-复制 `config/cloud.yaml.example` 为
-`config/cloud.yaml`，填写云端模型服务商提供的 `base_url`、`model` 与 `api_key`。私有配置已被 Git
-忽略。
+## 快速开始
 
 ```bash
 cd ~/tars-assistant
 cp config/cloud.yaml.example config/cloud.yaml
-# 编辑 config/cloud.yaml 后
-./scripts/deploy_agent.sh              # 推荐：自动建 venv/装依赖/校验配置/启动
-./scripts/deploy_agent.sh --port 8081  # 指定 Agent 监听端口
+# 填写 base_url、model、api_key
+./scripts/deploy_agent.sh
 ```
 
-`--mock` 仅用于协议联调：`python -m agent.server --mock`。
+Android 开发构建：
 
-## 状态
+```powershell
+.\.venv\Scripts\python.exe -m pytest agent bridge -q
+cd android
+.\gradlew.bat :app:assembleDebug
+```
 
-阶段 0-4 已完成；阶段 5 的云端真实动作闭环已完成基础链路和敏感操作防线验收，当前剩余 Gmail
-跨应用输入的 Android 执行层诊断。Agent 日志已确认云端连续生成 `home`、`click`、`click`、`type`，
-未发现 Agent 中断；本地 llama.cpp、GGUF 模型及其生命周期不再属于部署方案。
+安装 Debug APK 后，在系统中按需启用 TARS 无障碍服务、通知访问、麦克风与 Shizuku。设置页可配置
+运行参数、允许启动的应用和 Android 诊断日志上传。
+
+## 安全与诊断
+
+- 所有模型动作先经 schema 和 Android 白名单校验。
+- `launch` 只能启动用户在设置页勾选且仍已安装的应用。
+- 发送、删除、支付等敏感动作会在前台应用上显示二次确认浮层。
+- Android 诊断日志含原始 UI XML、动作和节点解析，仅在用户主动上传时发送；Agent 审计日志不保存
+  原始 XML。
 
 ## 文档
 
-- `docs/DESIGN.md` - 技术契约与安全边界
-- `docs/PROJECT_PLAN.md` - 计划与进度
-- `docs/DEPLOY.md` - 部署步骤
+- [技术契约](docs/DESIGN.md)
+- [部署与联调](docs/DEPLOY.md)
+- [运行时配置](docs/RUNTIME_CONFIG.md)
+- [AVD 验收基线](docs/AVD_TESTING.md)
+- [代码导航](docs/REPO_MAP.md)
+- [项目计划](docs/PROJECT_PLAN.md)
 
 ## 许可证
 

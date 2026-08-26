@@ -12,6 +12,9 @@ class TarsAccessibilityService : AccessibilityService() {
     @Volatile private var foregroundPackage: String? = null
     @Volatile private var foregroundActivity: String? = null
     @Volatile private var observationVersion: Long = 0L
+    @Volatile private var latestEventTrace: String = "none"
+    private val eventSourceLock = Any()
+    private var latestEventSource: AccessibilityNodeInfo? = null
     override fun onServiceConnected() {
         instance = this
         actionConfirmationOverlay = ActionConfirmationOverlay(this)
@@ -21,10 +24,10 @@ class TarsAccessibilityService : AccessibilityService() {
         // Preserve the latest foreground context for the next Agent request; UI remains pulled on demand.
         // Ignore input-method events: the soft keyboard emits its own window events and would
         // otherwise overwrite the real foreground app, breaking the "XML matches foreground" check.
-        if (event != null) {
-            val isImeEvent = try {
+        val isImeEvent = if (event != null) try {
                 windows?.firstOrNull { it.id == event.windowId }?.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD
-            } catch (_: Throwable) { false }
+            } catch (_: Throwable) { false } else false
+        if (event != null) {
             event.packageName?.toString()?.takeIf { it.isNotBlank() && !isImeEvent }?.let { foregroundPackage = it }
             event.className?.toString()?.takeIf { it.isNotBlank() }?.let { foregroundActivity = it }
         }
@@ -34,7 +37,15 @@ class TarsAccessibilityService : AccessibilityService() {
                 AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
                 AccessibilityEvent.TYPE_VIEW_FOCUSED,
                 AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                AccessibilityEvent.TYPE_VIEW_SELECTED -> observationVersion++
+                AccessibilityEvent.TYPE_VIEW_SELECTED -> {
+                    observationVersion++
+                    latestEventTrace = eventTrace(event)
+                    if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                        event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+                    ) {
+                        cacheEventSource(event, isImeEvent)
+                    }
+                }
             }
         }
     }
@@ -45,13 +56,35 @@ class TarsAccessibilityService : AccessibilityService() {
         floatingVoiceOverlay = null
         actionConfirmationOverlay?.dismiss()
         actionConfirmationOverlay = null
+        synchronized(eventSourceLock) {
+            latestEventSource?.recycle()
+            latestEventSource = null
+        }
         if (instance === this) instance = null
         super.onDestroy()
     }
 
-    fun currentUiXml(): String {
-        val roots = collectVisibleWindowRoots()
-        if (roots.isEmpty()) return ""
+    fun currentUiXml(): String = captureUiSnapshot()?.xml.orEmpty()
+
+    /**
+     * Serializes the raw application roots for local diagnosis only. A transition placeholder
+     * is useful evidence in Android logs, but is never a valid Agent request payload.
+     */
+    fun currentDiagnosticUiXml(): String {
+        val eventFallback = eventSourceFallback()
+        val roots = collectApplicationWindowRoots() + listOfNotNull(eventFallback)
+        if (roots.isEmpty()) {
+            eventFallback?.recycle()
+            return ""
+        }
+        return try {
+            serializeUiRoots(roots)
+        } finally {
+            eventFallback?.recycle()
+        }
+    }
+
+    private fun serializeUiRoots(roots: List<AccessibilityNodeInfo>): String {
         val dm = resources.displayMetrics
         val facts = windowFacts()
         return UiTreeXml.serializeWindows(roots, facts, dm.widthPixels, dm.heightPixels)
@@ -67,15 +100,7 @@ class TarsAccessibilityService : AccessibilityService() {
         val facts = mutableListOf<WindowFact>()
         try {
             windows?.forEach { w ->
-                val label = when (w.type) {
-                    AccessibilityWindowInfo.TYPE_APPLICATION -> "application"
-                    AccessibilityWindowInfo.TYPE_INPUT_METHOD -> "input_method"
-                    AccessibilityWindowInfo.TYPE_SYSTEM -> "system"
-                    AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY -> "accessibility_overlay"
-                    AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER -> "split_screen_divider"
-                    AccessibilityWindowInfo.TYPE_MAGNIFICATION_OVERLAY -> "magnification_overlay"
-                    else -> "type_${w.type}"
-                }
+                val label = windowTypeLabel(w.type)
                 val r = android.graphics.Rect().also { w.getBoundsInScreen(it) }
                 facts += WindowFact(label, w.layer, listOf(r.left, r.top, r.right, r.bottom))
             }
@@ -92,7 +117,7 @@ class TarsAccessibilityService : AccessibilityService() {
      * Only TYPE_APPLICATION / TYPE_ACCESSIBILITY_OVERLAY (ours is filtered below) /
      * app-owned overlay windows are considered; system and input-method windows are skipped.
      */
-    fun collectVisibleWindowRoots(): List<AccessibilityNodeInfo> {
+    private fun collectApplicationWindowRoots(): List<AccessibilityNodeInfo> {
         val roots = mutableListOf<AccessibilityNodeInfo>()
         val windows = try { windows } catch (_: Throwable) { emptyList<AccessibilityWindowInfo>() }
         // windows is already ordered by z-order (top-most first) on API 21+.
@@ -100,19 +125,45 @@ class TarsAccessibilityService : AccessibilityService() {
             if (w.type != AccessibilityWindowInfo.TYPE_APPLICATION) continue
             w.root?.let { roots += it }
         }
-        // Fallback: some windows (esp. full-screen transparent app windows) can report a
-        // null root via getWindows(); make sure we never hand an empty tree downstream.
-        if (roots.isEmpty()) {
-            rootInActiveWindow?.let { roots += it }
-        }
         return roots
     }
 
+    fun collectVisibleWindowRoots(): List<AccessibilityNodeInfo> {
+        val roots = collectApplicationWindowRoots()
+        // During app transitions getWindows() may expose a non-null placeholder root with
+        // no children (often bounds=[0,0][0,0], enabled=false). Do not let that stale root
+        // suppress the focused root fallback, which can already contain the real app tree.
+        val populated = roots.filter(::hasAccessibleContent)
+        if (populated.isNotEmpty()) return populated
+        rootInActiveWindow?.let { fallback ->
+            if (hasAccessibleContent(fallback)) return listOf(fallback)
+        }
+        eventSourceFallback()?.let { fallback ->
+            if (hasAccessibleContent(fallback) && matchesForeground(fallback)) return listOf(fallback)
+            fallback.recycle()
+        }
+        return emptyList()
+    }
+
+    /** True when a root contains a usable accessibility subtree rather than a placeholder. */
+    private fun hasAccessibleContent(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null) return false
+        for (index in 0 until node.childCount) {
+            if (hasAccessibleContent(node.getChild(index))) return true
+        }
+        return node.isEnabled && (
+            node.isClickable || node.isFocusable ||
+                !node.text.isNullOrBlank() || !node.contentDescription.isNullOrBlank()
+            )
+    }
+
     /** Nodes that are visually reachable: not fully covered by an upper-layer node. */
-    fun collectVisibleNodes(): List<Pair<AccessibilityNodeInfo, Int>> {
+    fun collectVisibleNodes(): List<Pair<AccessibilityNodeInfo, Int>> =
+        collectVisibleNodes(collectVisibleWindowRoots())
+
+    private fun collectVisibleNodes(roots: List<AccessibilityNodeInfo>): List<Pair<AccessibilityNodeInfo, Int>> {
         val covered = mutableListOf<android.graphics.Rect>()
         val visible = mutableListOf<Pair<AccessibilityNodeInfo, Int>>() // (node, layerIndex)
-        val roots = collectVisibleWindowRoots()
         val allWindows = try { windows } catch (_: Throwable) { emptyList<AccessibilityWindowInfo>() }
         Log.i(TAG_A11Y, String.format("collectVisible roots=%d totalWindows=%d types=%s",
             roots.size, allWindows.size, allWindows.map { it.type }.toString()))
@@ -183,6 +234,59 @@ class TarsAccessibilityService : AccessibilityService() {
 
     fun currentObservationVersion(): Long = observationVersion
 
+    /** One coherent XML/node view used by both the model request and action execution. */
+    fun captureUiSnapshot(): UiSnapshot? {
+        val roots = collectVisibleWindowRoots()
+        if (roots.isEmpty()) return null
+        return UiSnapshot(
+            xml = serializeUiRoots(roots),
+            visibleNodes = collectVisibleNodes(roots).map { it.first },
+            packageName = currentAppPackage(),
+            activity = currentActivity(),
+        )
+    }
+
+    /**
+     * Structural capture evidence for the Android diagnostic log. It intentionally excludes
+     * node text: the paired raw XML capture remains the content-level diagnostic record.
+     */
+    fun captureSourceState(): String {
+        val windows = try { windows.orEmpty() } catch (_: Throwable) { emptyList() }
+        val windowState = windows.joinToString(prefix = "[", postfix = "]") { window ->
+            "{id=${window.id},type=${windowTypeLabel(window.type)},layer=${window.layer}," +
+                "focused=${window.isFocused},root=${nodeTrace(window.root)}}"
+        }
+        return "windows=$windowState active_root=${nodeTrace(rootInActiveWindow)} latest_event=$latestEventTrace"
+    }
+
+    /** Wait for a populated foreground tree before allowing another Agent request. */
+    fun awaitStableUi(timeoutMs: Long, onCaptureStateChanged: (String) -> Unit = {}): UiSnapshot? {
+        val deadline = android.os.SystemClock.elapsedRealtime() + timeoutMs
+        var stableCandidate: String? = null
+        var lastCaptureState = ""
+        while (android.os.SystemClock.elapsedRealtime() < deadline) {
+            val captureState = captureSourceState()
+            if (captureState != lastCaptureState) {
+                onCaptureStateChanged(captureState)
+                lastCaptureState = captureState
+            }
+            val snapshot = captureUiSnapshot()
+            val uiXml = snapshot?.xml.orEmpty()
+            val packageName = snapshot?.packageName
+            val usable = uiXml.isNotBlank() && packageName != null &&
+                uiXml.contains("package=\"$packageName\"")
+            val stable = usable && stableCandidate == uiXml
+            Log.i(TAG_A11Y, String.format(
+                "awaitStableUi pkg=%s len=%d usable=%b stable=%b",
+                packageName, uiXml.length, usable, stable,
+            ))
+            if (stable) return snapshot
+            stableCandidate = if (usable) uiXml else null
+            if (!sleepForObservation()) return null
+        }
+        return null
+    }
+
     /** Poll the root window until it differs from the pre-action UI snapshot.
      *
      * Primary signal: the foreground package changed (handles cross-app window
@@ -205,18 +309,20 @@ class TarsAccessibilityService : AccessibilityService() {
         // Require the SAME fresh XML twice in a row so the next round observes a settled window.
         var stableCandidate: String? = null
         while (android.os.SystemClock.elapsedRealtime() < deadline) {
-            val currentUiXml = currentUiXml()
-            val curPkg = currentAppPackage()
+            val snapshot = captureUiSnapshot()
+            val currentUiXml = snapshot?.xml.orEmpty()
+            val curPkg = snapshot?.packageName
             val pkgChanged = curPkg != null && curPkg != previousPackage
             val xmlChanged = currentUiXml.isNotBlank() && currentUiXml != previousUiXml
             val eventChanged = observationVersion != previousObservationVersion
+            val treePopulated = currentUiXml.isNotBlank()
             val xmlMatchesForeground = curPkg != null && currentUiXml.contains("package=\"$curPkg\"")
-            val fresh = xmlMatchesForeground && (pkgChanged || xmlChanged)
+            val fresh = treePopulated && xmlMatchesForeground && (pkgChanged || xmlChanged)
             val stable = fresh && stableCandidate == currentUiXml
             Log.i(TAG_A11Y, String.format(
-                "awaitFresh poll pkg=%s len=%d blank=%b pkgChanged=%b xmlChanged=%b eventChanged=%b xmlMatchesForeground=%b fresh=%b stable=%b",
-                curPkg, currentUiXml.length, currentUiXml.isBlank(), pkgChanged, xmlChanged,
-                eventChanged, xmlMatchesForeground, fresh, stable,
+                "awaitFresh poll pkg=%s len=%d blank=%b populated=%b pkgChanged=%b xmlChanged=%b eventChanged=%b xmlMatchesForeground=%b fresh=%b stable=%b",
+                curPkg, currentUiXml.length, currentUiXml.isBlank(), treePopulated, pkgChanged,
+                xmlChanged, eventChanged, xmlMatchesForeground, fresh, stable,
             ))
             if (stable) return true
             stableCandidate = if (fresh) currentUiXml else null
@@ -224,7 +330,7 @@ class TarsAccessibilityService : AccessibilityService() {
             // blank for a couple of seconds. Give a package change a bounded grace so we don't
             // time out and drop the capture before the tree settles.
             val newAppGraceMs = RuntimeSettings.read(this).newAppGraceMs
-            if (pkgChanged && currentUiXml.isBlank() && android.os.SystemClock.elapsedRealtime() < baseDeadline + newAppGraceMs) {
+            if (!treePopulated && android.os.SystemClock.elapsedRealtime() < baseDeadline + newAppGraceMs) {
                 deadline = baseDeadline + newAppGraceMs
             }
             if (eventChanged) {
@@ -232,28 +338,93 @@ class TarsAccessibilityService : AccessibilityService() {
                 // trigger another sample but never prove that its XML is fresh on their own.
                 Log.i(TAG_A11Y, "awaitFresh event observed; waiting for a stable foreground XML")
             }
-            try {
-                Thread.sleep(OBSERVATION_POLL_MS)
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
-                return false
-            }
+            if (!sleepForObservation()) return false
         }
         return false
+    }
+
+    private fun sleepForObservation(): Boolean = try {
+        Thread.sleep(OBSERVATION_POLL_MS)
+        true
+    } catch (_: InterruptedException) {
+        Thread.currentThread().interrupt()
+        false
+    }
+
+    private fun cacheEventSource(event: AccessibilityEvent, isImeEvent: Boolean) {
+        if (isImeEvent) return
+        val source = event.source ?: return
+        val copy = try { AccessibilityNodeInfo.obtain(source) } catch (_: Throwable) { return }
+        if (!hasAccessibleContent(copy)) {
+            copy.recycle()
+            return
+        }
+        synchronized(eventSourceLock) {
+            latestEventSource?.recycle()
+            latestEventSource = copy
+        }
+    }
+
+    private fun eventSourceFallback(): AccessibilityNodeInfo? = synchronized(eventSourceLock) {
+        latestEventSource?.let { AccessibilityNodeInfo.obtain(it) }
+    }
+
+    private fun matchesForeground(node: AccessibilityNodeInfo): Boolean {
+        val expected = foregroundPackage ?: return true
+        return node.packageName?.toString() == expected
+    }
+
+    private fun eventTrace(event: AccessibilityEvent): String = try {
+        "type=${eventTypeLabel(event.eventType)},window=${event.windowId},pkg=${event.packageName?.toString().orEmpty()}," +
+            "class=${event.className?.toString().orEmpty()},source=${nodeTrace(event.source)}"
+    } catch (_: Throwable) {
+        "type=${eventTypeLabel(event.eventType)},window=${event.windowId},source=unavailable"
+    }
+
+    private fun nodeTrace(node: AccessibilityNodeInfo?): String {
+        if (node == null) return "none"
+        return try {
+            val bounds = android.graphics.Rect().also { node.getBoundsInScreen(it) }
+            "pkg=${node.packageName?.toString().orEmpty()},class=${node.className?.toString().orEmpty()},enabled=${node.isEnabled}," +
+                "children=${node.childCount},bounds=[${bounds.left},${bounds.top}][${bounds.right},${bounds.bottom}]"
+        } catch (_: Throwable) {
+            "unavailable"
+        }
+    }
+
+    private fun windowTypeLabel(type: Int): String = when (type) {
+        AccessibilityWindowInfo.TYPE_APPLICATION -> "application"
+        AccessibilityWindowInfo.TYPE_INPUT_METHOD -> "input_method"
+        AccessibilityWindowInfo.TYPE_SYSTEM -> "system"
+        AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY -> "accessibility_overlay"
+        AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER -> "split_screen_divider"
+        AccessibilityWindowInfo.TYPE_MAGNIFICATION_OVERLAY -> "magnification_overlay"
+        else -> "type_$type"
+    }
+
+    private fun eventTypeLabel(type: Int): String = when (type) {
+        AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> "window_state_changed"
+        AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> "window_content_changed"
+        AccessibilityEvent.TYPE_VIEW_FOCUSED -> "view_focused"
+        AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> "view_text_changed"
+        AccessibilityEvent.TYPE_VIEW_SELECTED -> "view_selected"
+        else -> "type_$type"
     }
 
     fun execute(
         actions: List<AgentAction>,
         confirm: (AgentAction) -> Boolean = { false },
+        snapshot: UiSnapshot? = null,
         sessionId: String = "-",
     ): ActionExecutor.ExecutionSummary =
-        ActionExecutor(this, confirm, sessionId = sessionId).execute(actions)
+        ActionExecutor(this, confirm, snapshotNodes = snapshot?.visibleNodes, sessionId = sessionId).execute(actions)
 
-    fun confirmAction(action: AgentAction): Boolean =
-        actionConfirmationOverlay?.confirm(actionConfirmationDescription(action)) == true
+    fun confirmAction(action: AgentAction, snapshot: UiSnapshot? = null): Boolean =
+        actionConfirmationOverlay?.confirm(actionConfirmationDescription(action, snapshot?.visibleNodes)) == true
 
-    private fun actionConfirmationDescription(action: AgentAction): String {
-        val node = action.targetNodeId?.let { id -> collectVisibleNodes().map { it.first }.take(60).getOrNull(id) }
+    private fun actionConfirmationDescription(action: AgentAction, visibleNodes: List<AccessibilityNodeInfo>?): String {
+        val nodes = visibleNodes ?: collectVisibleNodes().map { it.first }
+        val node = action.targetNodeId?.let { id -> nodes.take(60).getOrNull(id) }
         val nodeType = node?.let(::confirmationNodeType) ?: "控件"
         val nodeText = node?.let(::confirmationNodeText)?.ifBlank { "无文本" } ?: "无文本"
         return when (action.type) {
@@ -313,6 +484,13 @@ class TarsAccessibilityService : AccessibilityService() {
 }
 
 private data class WindowFact(val typeLabel: String, val layer: Int, val bounds: List<Int>)
+
+data class UiSnapshot(
+    val xml: String,
+    val visibleNodes: List<AccessibilityNodeInfo>,
+    val packageName: String?,
+    val activity: String?,
+)
 
 private object UiTreeXml {
     fun serialize(root: AccessibilityNodeInfo): String = buildString {

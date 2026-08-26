@@ -1,32 +1,38 @@
 # TARS Android 执行侧
 
-这是阶段 4 的原生 Kotlin 执行侧最小工程：
+Android 原生模块负责对话入口、设置、无障碍采集、受限动作执行和用户确认；不承担模型推理或云端
+凭据保存。
 
-- `AgentClient` 使用 `HttpURLConnection` 调用默认的 `127.0.0.1:8080` 或设置页配置的 Agent 主机
-- `TarsAccessibilityService` 采集当前无障碍树并序列化为 `ui_xml`
-- 无障碍事件提供最近前台应用包名和窗口类名，随每轮 `task_request` 一并回传给 Agent
-- 无障碍服务连接后会在主界面显示已连接状态
-- `ActionExecutor` 执行 click/type/back/home/wait；未知动作默认拒绝
-- 任一动作被拒绝、取消或失败时，执行侧立即停止该轮，不再下发后续动作或观察请求
-- 任务的最终执行结果或失败信息会保留在主界面，不会被后续无障碍连接广播覆盖
-- 需要下一轮观察时，执行侧轮询直到动作后 UI XML 与原快照不同；2 秒内无更新则安全停止，避免传回陈旧或过渡 UI
-- 设置页的“应用启动”入口可进入独立列表页，刷新并勾选允许启动的应用；每次任务仅将这些仍安装的 `{label, package_name}` 发送给 Agent，Agent 与 Android 执行侧都会拒绝目录外的 `launch`
-- `ShizukuGateway` 用官方 UserService + AIDL 执行参数受限的 `input swipe`；当无障碍文本设置失败时，以 `input text` 回退，需用户显式授权
-- `VoiceIntentCapture` 使用原生 `SpeechRecognizer`；按住说话只填入任务意图，用户仍须检查并发送
-- 悬浮语音由已授权的无障碍服务创建 `TYPE_ACCESSIBILITY_OVERLAY` 按钮；按住识别的最终结果仅写入待处理任务，用户须在 App 中载入、检查并发送
-- `MainActivity` 提供手动任务入口，并按 `need_observation` 最多推进 12 轮
+## 能力边界
 
-使用 Android Studio 打开本目录并同步 Gradle，或在此目录运行
-`gradlew.bat :app:assembleDebug`。Debug APK 输出到
-`app/build/outputs/apk/debug/app-debug.apk`。安装后需要在系统无障碍设置中启用
-“TARS Assistant”，并先启动 Termux 中的 Agent 服务。需要滑动时，在 App 内点击“授权
-Shizuku”并在 Shizuku 弹窗确认；服务不可用、未授权或参数非法时，动作保持 fail-closed。
-可使用“打开无障碍设置”进入系统设置并显式启用服务。
-通知触发需要单独在“打开通知访问设置”中显式授权“TARS 通知触发”；收到通知后只会生成待
-处理任务，仍须由用户载入、检查并发送。
-启用悬浮语音前，须先启用无障碍服务并授予麦克风权限；它不需要广泛的“显示在其他应用上层”
-权限。
+- `MainActivity` 提供对话式任务界面、状态提示、复制/重发、清除记录和任务终止。输入框通过 Window
+  Insets 随软键盘上移。
+- `TarsAccessibilityService` 采集多应用窗口层的 UI XML；空骨架根会回退到
+  `rootInActiveWindow`。空根仅保留在本地诊断日志，App 会在本地等待稳定、有效且匹配前台包名的
+  UI，超时后安全结束任务，绝不把空树发送给 Agent。
+- `ActionExecutor` 仅执行经过校验的 `click/type/swipe/back/home/launch/wait/reply/done`；失败、
+  拒绝或取消后立即停止当前轮。
+- `launch` 仅允许设置页中用户勾选且当前仍安装的 launcher 应用，Agent 与 Android 双端校验。
+- `type` 优先使用无障碍 API；失败时仅以 Shizuku UserService 执行受限 `input text` 回退，滑动同理。
+- 发送、删除、支付等敏感动作通过 `TYPE_ACCESSIBILITY_OVERLAY` 在当前前台应用上显示确认浮层。
+- 通知、定时、悬浮语音只创建待处理任务，用户须载入、检查并发送。
 
-Android 的 cleartext 默认策略会阻止 HTTP，因此 Manifest 明确启用了 cleartext。`AgentClient` 默认访问
-`http://127.0.0.1:8080`，设置页可改为有效 IPv4、IPv6 或域名与端口。loopback 请求显式使用
-`Proxy.NO_PROXY`，远程主机则使用设备网络路径；远程 HTTP Agent 应仅部署在受信任网络中。
+## 设置与日志
+
+设置页包含系统授权入口、运行参数、独立应用列表和“发送 Android 日志”。应用列表可刷新，保存时会
+复查已卸载应用。Android 私有诊断日志写入 `files/log/android.log`，包含短 session ID、原始 XML、
+Agent 响应、动作与实际节点；用户主动上传后，Agent 保存到 `log/android/`。
+
+## 构建与安装
+
+使用 Android Studio 打开本目录，或执行：
+
+```powershell
+.\gradlew.bat :app:assembleDebug
+```
+
+Debug APK 输出到 `app/build/outputs/apk/debug/app-debug.apk`。安装后需在系统无障碍设置中启用
+“TARS Assistant”，并先启动 Agent 服务。通知访问、麦克风和 Shizuku 授权均应在系统界面显式完成。
+
+`AgentClient` 默认请求 `http://127.0.0.1:8080`。设置页接受有效 IPv4、IPv6 或域名和端口；
+loopback 请求不使用系统代理，远程请求走设备网络。远程 HTTP Agent 只应部署在受信任网络中。

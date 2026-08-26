@@ -281,7 +281,40 @@ class MainActivity : Activity() {
                     finishCancelledTask()
                     return
                 }
-                val uiXml = service.currentUiXml()
+                var snapshot = service.captureUiSnapshot()
+                if (snapshot == null) {
+                    val rawUiXml = service.currentDiagnosticUiXml()
+                    val currentForeground = service.currentAppPackage() ?: UNKNOWN_FOREGROUND
+                    appendLog("当前界面尚未提供有效无障碍树，正在本地等待加载。")
+                    AndroidLogStore.appendBlock(this, buildString {
+                        append("session=$sessionId round=${round + 1} capture_rejected app=")
+                        append(JSONObject.quote(currentForeground))
+                        append(" reason=empty_or_placeholder_root raw_xml_bytes=")
+                        append(rawUiXml.toByteArray(Charsets.UTF_8).size)
+                        append(" raw_ui_xml_begin\n")
+                        append(rawUiXml)
+                        append("\nraw_ui_xml_end\ncapture_sources=")
+                        append(service.captureSourceState())
+                    })
+                    snapshot = service.awaitStableUi(
+                        runtime.observationTimeoutMs + runtime.newAppGraceMs,
+                    ) { state ->
+                        AndroidLogStore.append(
+                            this,
+                            "session=$sessionId round=${round + 1} capture_sources_changed $state",
+                        )
+                    }
+                    if (snapshot == null) {
+                        appendLog("未获取到有效无障碍界面，已安全停止任务。")
+                        AndroidLogStore.append(
+                            this,
+                            "session=$sessionId round=${round + 1} agent_request_skipped reason=ui_tree_not_ready",
+                        )
+                        reachedRoundLimit = false
+                        break
+                    }
+                }
+                val uiXml = snapshot.xml
                 val observationVersion = service.currentObservationVersion()
                 val foreground = service.currentAppPackage() ?: UNKNOWN_FOREGROUND
                 appendLog("第 ${round + 1} 轮，前台应用：$foreground")
@@ -305,7 +338,12 @@ class MainActivity : Activity() {
                 )
                 noteForNextRound = ""
                 if (response.reply.isNotBlank()) appendLog(response.reply)
-                val execution = service.execute(response.actions, service::confirmAction, sessionId)
+                val execution = service.execute(
+                    response.actions,
+                    { action -> service.confirmAction(action, snapshot) },
+                    snapshot,
+                    sessionId,
+                )
                 execution.messages.forEach(::appendLog)
                 if (cancelRequested) {
                     finishCancelledTask()
@@ -333,12 +371,11 @@ class MainActivity : Activity() {
                     reachedRoundLimit = false
                     break
                 }
-                val pkgChanged = service.currentAppPackage() != null && service.currentAppPackage() != foreground
                 if (cancelRequested) {
                     finishCancelledTask()
                     return
                 }
-                if (!service.awaitFreshUiAfter(uiXml, foreground, runtime.observationTimeoutMs, observationVersion) && !pkgChanged) {
+                if (!service.awaitFreshUiAfter(uiXml, foreground, runtime.observationTimeoutMs, observationVersion)) {
                     consecutiveNoChange++
                     noteForNextRound = NO_CHANGE_NOTE
                     appendLog("未观察到界面更新，正在重新采集当前界面（连续无变化第 $consecutiveNoChange 次）。")
