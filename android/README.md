@@ -8,7 +8,8 @@ Android 原生模块负责对话入口、设置、无障碍采集、受限动作
 - `MainActivity` 提供对话式任务界面、状态提示、复制/重发、清除记录和任务终止。输入框通过 Window
   Insets 随软键盘上移。
 - `TarsAccessibilityService` 采集多应用窗口层的 UI XML；空骨架根会回退到
-  `rootInActiveWindow`，动作后只有稳定且与前台包名匹配的有效 UI 才能进入下一轮。
+  `rootInActiveWindow`。空根仅保留在本地诊断日志，App 会在本地等待稳定、有效且匹配前台包名的
+  UI，超时后安全结束任务，绝不把空树发送给 Agent。
 - `ActionExecutor` 仅执行经过校验的 `click/type/swipe/back/home/launch/wait/reply/done`；失败、
   拒绝或取消后立即停止当前轮。
 - `launch` 仅允许设置页中用户勾选且当前仍安装的 launcher 应用，Agent 与 Android 双端校验。

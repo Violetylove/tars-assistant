@@ -281,7 +281,34 @@ class MainActivity : Activity() {
                     finishCancelledTask()
                     return
                 }
-                val uiXml = service.currentUiXml()
+                var uiXml = service.currentUiXml()
+                if (uiXml.isBlank()) {
+                    val rawUiXml = service.currentDiagnosticUiXml()
+                    val currentForeground = service.currentAppPackage() ?: UNKNOWN_FOREGROUND
+                    appendLog("当前界面尚未提供有效无障碍树，正在本地等待加载。")
+                    AndroidLogStore.appendBlock(this, buildString {
+                        append("session=$sessionId round=${round + 1} capture_rejected app=")
+                        append(JSONObject.quote(currentForeground))
+                        append(" reason=empty_or_placeholder_root raw_xml_bytes=")
+                        append(rawUiXml.toByteArray(Charsets.UTF_8).size)
+                        append(" raw_ui_xml_begin\n")
+                        append(rawUiXml)
+                        append("\nraw_ui_xml_end")
+                    })
+                    val stableUiXml = service.awaitStableUi(
+                        runtime.observationTimeoutMs + runtime.newAppGraceMs,
+                    )
+                    if (stableUiXml == null) {
+                        appendLog("未获取到有效无障碍界面，已安全停止任务。")
+                        AndroidLogStore.append(
+                            this,
+                            "session=$sessionId round=${round + 1} agent_request_skipped reason=ui_tree_not_ready",
+                        )
+                        reachedRoundLimit = false
+                        break
+                    }
+                    uiXml = stableUiXml
+                }
                 val observationVersion = service.currentObservationVersion()
                 val foreground = service.currentAppPackage() ?: UNKNOWN_FOREGROUND
                 appendLog("第 ${round + 1} 轮，前台应用：$foreground")

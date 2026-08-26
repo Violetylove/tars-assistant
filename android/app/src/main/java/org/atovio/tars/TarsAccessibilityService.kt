@@ -52,6 +52,20 @@ class TarsAccessibilityService : AccessibilityService() {
     fun currentUiXml(): String {
         val roots = collectVisibleWindowRoots()
         if (roots.isEmpty()) return ""
+        return serializeUiRoots(roots)
+    }
+
+    /**
+     * Serializes the raw application roots for local diagnosis only. A transition placeholder
+     * is useful evidence in Android logs, but is never a valid Agent request payload.
+     */
+    fun currentDiagnosticUiXml(): String {
+        val roots = collectApplicationWindowRoots()
+        if (roots.isEmpty()) return ""
+        return serializeUiRoots(roots)
+    }
+
+    private fun serializeUiRoots(roots: List<AccessibilityNodeInfo>): String {
         val dm = resources.displayMetrics
         val facts = windowFacts()
         return UiTreeXml.serializeWindows(roots, facts, dm.widthPixels, dm.heightPixels)
@@ -92,7 +106,7 @@ class TarsAccessibilityService : AccessibilityService() {
      * Only TYPE_APPLICATION / TYPE_ACCESSIBILITY_OVERLAY (ours is filtered below) /
      * app-owned overlay windows are considered; system and input-method windows are skipped.
      */
-    fun collectVisibleWindowRoots(): List<AccessibilityNodeInfo> {
+    private fun collectApplicationWindowRoots(): List<AccessibilityNodeInfo> {
         val roots = mutableListOf<AccessibilityNodeInfo>()
         val windows = try { windows } catch (_: Throwable) { emptyList<AccessibilityWindowInfo>() }
         // windows is already ordered by z-order (top-most first) on API 21+.
@@ -100,6 +114,11 @@ class TarsAccessibilityService : AccessibilityService() {
             if (w.type != AccessibilityWindowInfo.TYPE_APPLICATION) continue
             w.root?.let { roots += it }
         }
+        return roots
+    }
+
+    fun collectVisibleWindowRoots(): List<AccessibilityNodeInfo> {
+        val roots = collectApplicationWindowRoots()
         // During app transitions getWindows() may expose a non-null placeholder root with
         // no children (often bounds=[0,0][0,0], enabled=false). Do not let that stale root
         // suppress the focused root fallback, which can already contain the real app tree.
@@ -108,8 +127,7 @@ class TarsAccessibilityService : AccessibilityService() {
         rootInActiveWindow?.let { fallback ->
             if (hasAccessibleContent(fallback)) return listOf(fallback)
         }
-        // Keep the original roots for diagnostics when both sources are still empty.
-        return roots
+        return emptyList()
     }
 
     /** True when a root contains a usable accessibility subtree rather than a placeholder. */
@@ -199,6 +217,27 @@ class TarsAccessibilityService : AccessibilityService() {
 
     fun currentObservationVersion(): Long = observationVersion
 
+    /** Wait for a populated foreground tree before allowing another Agent request. */
+    fun awaitStableUi(timeoutMs: Long): String? {
+        val deadline = android.os.SystemClock.elapsedRealtime() + timeoutMs
+        var stableCandidate: String? = null
+        while (android.os.SystemClock.elapsedRealtime() < deadline) {
+            val uiXml = currentUiXml()
+            val packageName = currentAppPackage()
+            val usable = uiXml.isNotBlank() && packageName != null &&
+                uiXml.contains("package=\"$packageName\"")
+            val stable = usable && stableCandidate == uiXml
+            Log.i(TAG_A11Y, String.format(
+                "awaitStableUi pkg=%s len=%d usable=%b stable=%b",
+                packageName, uiXml.length, usable, stable,
+            ))
+            if (stable) return uiXml
+            stableCandidate = if (usable) uiXml else null
+            if (!sleepForObservation()) return null
+        }
+        return null
+    }
+
     /** Poll the root window until it differs from the pre-action UI snapshot.
      *
      * Primary signal: the foreground package changed (handles cross-app window
@@ -226,7 +265,7 @@ class TarsAccessibilityService : AccessibilityService() {
             val pkgChanged = curPkg != null && curPkg != previousPackage
             val xmlChanged = currentUiXml.isNotBlank() && currentUiXml != previousUiXml
             val eventChanged = observationVersion != previousObservationVersion
-            val treePopulated = collectVisibleWindowRoots().any(::hasAccessibleContent)
+            val treePopulated = currentUiXml.isNotBlank()
             val xmlMatchesForeground = curPkg != null && currentUiXml.contains("package=\"$curPkg\"")
             val fresh = treePopulated && xmlMatchesForeground && (pkgChanged || xmlChanged)
             val stable = fresh && stableCandidate == currentUiXml
@@ -249,14 +288,17 @@ class TarsAccessibilityService : AccessibilityService() {
                 // trigger another sample but never prove that its XML is fresh on their own.
                 Log.i(TAG_A11Y, "awaitFresh event observed; waiting for a stable foreground XML")
             }
-            try {
-                Thread.sleep(OBSERVATION_POLL_MS)
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
-                return false
-            }
+            if (!sleepForObservation()) return false
         }
         return false
+    }
+
+    private fun sleepForObservation(): Boolean = try {
+        Thread.sleep(OBSERVATION_POLL_MS)
+        true
+    } catch (_: InterruptedException) {
+        Thread.currentThread().interrupt()
+        false
     }
 
     fun execute(
