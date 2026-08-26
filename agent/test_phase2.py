@@ -218,6 +218,28 @@ def test_decision_prompt_compacts_recent_action_history():
     assert '"actions"' not in message
 
 
+def test_decide_once_bounds_oversized_model_action_batches():
+    from agent.agent_loop import decide_once
+
+    class OversizedLLM:
+        def complete(self, messages, temperature=0):
+            return json.dumps({
+                "actions": [
+                    {"type": "click", "target_node_id": index}
+                    for index in range(12)
+                ],
+                "done": True,
+            })
+
+    response = decide_once(
+        llm=OversizedLLM(), session_id="oversized-actions", intent="继续",
+        ui_xml=SIMPLE_XML, max_retries=0,
+    )
+    assert len(response["actions"]) == 8
+    assert response["done"] is False
+    assert response["need_observation"] is True
+
+
 def test_decision_logs_complete_model_input_and_output(caplog):
     llm = MockLLM(script=[lambda: "完整思考过程\n{" + '"type":"done"}' ])
     with caplog.at_level(logging.INFO, logger="tars.agent_loop"):

@@ -90,6 +90,7 @@ TARS_PACKAGE = "org.atovio.tars"
 
 _HISTORY_MAX_ROUNDS = 3
 _HISTORY_TEXT_LIMIT = 80
+_MAX_ACTIONS_PER_RESPONSE = 8
 
 
 _SENSITIVE_LABELS = ("发送", "删除", "清除", "支付", "付款", "转账", "send", "delete", "pay")
@@ -207,6 +208,23 @@ def _compact_history_for_prompt(history: list[dict], max_rounds: int = _HISTORY_
     for offset, entry in enumerate(selected):
         lines.append(f"第{first_round + offset}轮：{_compact_action_sequence(entry.get('actions') if isinstance(entry, dict) else entry)}")
     return "\n".join(lines)
+
+
+def _bound_response_actions(resp: dict) -> bool:
+    """Keep model responses within the wire contract before schema validation.
+
+    Some models return a complete plan as one ``actions`` array despite the
+    observation-driven protocol. Retain only the first bounded batch; the next
+    observation lets the model continue with fresh node IDs instead of putting
+    an oversized history entry on the following Android request.
+    """
+    actions = resp.get("actions")
+    if not isinstance(actions, list) or len(actions) <= _MAX_ACTIONS_PER_RESPONSE:
+        return False
+    resp["actions"] = actions[:_MAX_ACTIONS_PER_RESPONSE]
+    resp["done"] = False
+    resp["need_observation"] = True
+    return True
 
 
 @dataclass
@@ -364,6 +382,11 @@ def decide_once(
                 continue
             return _safe_response(session_id, f"LLM 输出缺少可识别的动作字段：{obj}")
 
+        if _bound_response_actions(resp):
+            logger.warning(
+                "model response actions exceeded limit; continuing in batches session=%s limit=%d",
+                session_id, _MAX_ACTIONS_PER_RESPONSE,
+            )
         _normalize_known_node_ids(resp, nodes)
         _enforce_sensitive_confirmation(resp, nodes)
         if not _launch_actions_are_allowed(resp, launchable_apps):

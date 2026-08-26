@@ -287,22 +287,27 @@ class TarsAccessibilityService : AccessibilityService() {
         return null
     }
 
-    /** Poll the root window until it differs from the pre-action UI snapshot.
+    /** Poll the root window until it is a stable post-action snapshot.
      *
-     * Primary signal: the foreground package changed (handles cross-app window
-     * switches where rootInActiveWindow's node tree lags behind). Fallback: the
-     * serialised XML differs. Timeout stays fail-closed.
+     * A launch has a stronger contract than ordinary UI actions: it must settle on the
+     * launched package. Without this, TARS's own timeline update can change its XML while
+     * Android is still switching windows and be mistaken for the launched application's UI.
      */
     fun awaitFreshUiAfter(
         previousUiXml: String,
         previousPackage: String?,
         timeoutMs: Long,
         previousObservationVersion: Long = observationVersion,
+        expectedPackage: String? = null,
+        extraGraceMs: Long = 0L,
     ): Boolean {
         val start = android.os.SystemClock.elapsedRealtime()
         val baseDeadline = start + timeoutMs
-        var deadline = baseDeadline
-        Log.i(TAG_A11Y, String.format("awaitFresh prev_len=%d prev_pkg=%s prev_version=%d", previousUiXml.length, previousPackage, previousObservationVersion))
+        val deadline = baseDeadline + extraGraceMs
+        Log.i(TAG_A11Y, String.format(
+            "awaitFresh prev_len=%d prev_pkg=%s prev_version=%d expected_pkg=%s grace_ms=%d",
+            previousUiXml.length, previousPackage, previousObservationVersion, expectedPackage, extraGraceMs,
+        ))
         // A single fresh signal can be a mid-transition snapshot: the previous app is still
         // serialised while the next app animates in, so the next round would observe a stale
         // tree and re-act on the old screen (e.g. clicking the launcher icon a second time).
@@ -317,22 +322,22 @@ class TarsAccessibilityService : AccessibilityService() {
             val eventChanged = observationVersion != previousObservationVersion
             val treePopulated = currentUiXml.isNotBlank()
             val xmlMatchesForeground = curPkg != null && currentUiXml.contains("package=\"$curPkg\"")
-            val fresh = treePopulated && xmlMatchesForeground && (pkgChanged || xmlChanged)
+            val matchesExpectedPackage = expectedPackage == null || curPkg == expectedPackage
+            val fresh = UiFreshness.isFresh(
+                previousUiXml = previousUiXml,
+                previousPackage = previousPackage,
+                currentUiXml = currentUiXml,
+                currentPackage = curPkg,
+                expectedPackage = expectedPackage,
+            )
             val stable = fresh && stableCandidate == currentUiXml
             Log.i(TAG_A11Y, String.format(
-                "awaitFresh poll pkg=%s len=%d blank=%b populated=%b pkgChanged=%b xmlChanged=%b eventChanged=%b xmlMatchesForeground=%b fresh=%b stable=%b",
-                curPkg, currentUiXml.length, currentUiXml.isBlank(), treePopulated, pkgChanged,
-                xmlChanged, eventChanged, xmlMatchesForeground, fresh, stable,
+                "awaitFresh poll pkg=%s expected_pkg=%s len=%d blank=%b populated=%b pkgChanged=%b xmlChanged=%b eventChanged=%b xmlMatchesForeground=%b matchesExpected=%b fresh=%b stable=%b",
+                curPkg, expectedPackage, currentUiXml.length, currentUiXml.isBlank(), treePopulated, pkgChanged,
+                xmlChanged, eventChanged, xmlMatchesForeground, matchesExpectedPackage, fresh, stable,
             ))
             if (stable) return true
             stableCandidate = if (fresh) currentUiXml else null
-            // A newly-launched app (cold start) can render its accessibility tree slowly, staying
-            // blank for a couple of seconds. Give a package change a bounded grace so we don't
-            // time out and drop the capture before the tree settles.
-            val newAppGraceMs = RuntimeSettings.read(this).newAppGraceMs
-            if (!treePopulated && android.os.SystemClock.elapsedRealtime() < baseDeadline + newAppGraceMs) {
-                deadline = baseDeadline + newAppGraceMs
-            }
             if (eventChanged) {
                 // Events frequently arrive before getWindows/rootInActiveWindow catches up. They
                 // trigger another sample but never prove that its XML is fresh on their own.

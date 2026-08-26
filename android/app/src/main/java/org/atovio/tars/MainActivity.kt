@@ -331,7 +331,18 @@ class MainActivity : Activity() {
                     intent = taskIntent, app = service.currentAppPackage(), activity = service.currentActivity(), uiXml = uiXml,
                     sessionId = sessionId, history = history, observationNote = noteForNextRound.takeIf { it.isNotBlank() },
                     launchableApps = LaunchableApps.selectedInstalled(this),
-                ))
+                )).let { parsed ->
+                    if (parsed.actions.size <= MAX_ACTIONS_PER_HISTORY_ENTRY) {
+                        parsed
+                    } else {
+                        appendLog("Agent 返回动作过多，已分批执行。")
+                        parsed.copy(
+                            actions = parsed.actions.take(MAX_ACTIONS_PER_HISTORY_ENTRY),
+                            done = false,
+                            needObservation = true,
+                        )
+                    }
+                }
                 AndroidLogStore.append(
                     this,
                     "session=$sessionId round=${round + 1} agent_response done=${response.done} need_observation=${response.needObservation} reply=${JSONObject.quote(response.reply)} actions=${response.actions.toJsonArray()}",
@@ -360,7 +371,9 @@ class MainActivity : Activity() {
                     }
                     continue
                 }
-                history.put(JSONObject().put("actions", response.actions.toJsonArray()))
+                // Keep the next request valid even when an older/misconfigured Agent
+                // returns more actions than the protocol permits in one history entry.
+                history.put(JSONObject().put("actions", response.actions.take(MAX_ACTIONS_PER_HISTORY_ENTRY).toJsonArray()))
                 if (response.done) {
                     completedByAgent = true
                     reachedRoundLimit = false
@@ -375,7 +388,16 @@ class MainActivity : Activity() {
                     finishCancelledTask()
                     return
                 }
-                if (!service.awaitFreshUiAfter(uiXml, foreground, runtime.observationTimeoutMs, observationVersion)) {
+                val launchedPackage = response.actions.lastOrNull { it.type == "launch" }?.packageName
+                if (!service.awaitFreshUiAfter(
+                        previousUiXml = uiXml,
+                        previousPackage = foreground,
+                        timeoutMs = runtime.observationTimeoutMs,
+                        previousObservationVersion = observationVersion,
+                        expectedPackage = launchedPackage,
+                        extraGraceMs = if (launchedPackage != null) runtime.newAppGraceMs else 0L,
+                    )
+                ) {
                     consecutiveNoChange++
                     noteForNextRound = NO_CHANGE_NOTE
                     appendLog("未观察到界面更新，正在重新采集当前界面（连续无变化第 $consecutiveNoChange 次）。")
@@ -655,6 +677,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val MAX_NO_CHANGE_ROUNDS = 2
+        private const val MAX_ACTIONS_PER_HISTORY_ENTRY = 8
         private const val UNKNOWN_FOREGROUND = "未知"
         private const val NO_CHANGE_NOTE = "上一轮动作未使界面发生变化（目标可能被遮挡、已出视口或不可达）。当前界面见本次新采集；请重新观察，选择其他能推进目标的动作。"
         private const val MICROPHONE_PERMISSION_REQUEST_CODE = 1003
