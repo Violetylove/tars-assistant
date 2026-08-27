@@ -17,12 +17,14 @@ cp config/cloud.yaml.example config/cloud.yaml
 
 | 字段 | 内容 |
 |---|---|
-| `llm.base_url` | OpenAI-compatible HTTPS 地址，通常以 `/v1` 结尾 |
+| `llm.base_url` | OpenAI-compatible 端点，通常以 `/v1` 结尾；默认 HTTPS，明文 HTTP 需 `allow_insecure_http: true`（仅限可信网络） |
 | `llm.model` | 服务商模型 ID |
 | `llm.api_key` | API Key，仅保留在该文件 |
 | `llm.timeout_seconds` | 单次云端请求上限，建议 60-120 秒 |
 | `llm.max_retries` | 额外重试次数，0-3 |
 | `llm.retry_backoff_seconds` | 首次重试等待秒数，0-10，后续指数退避 |
+| `llm.allow_insecure_http` | 允许明文 HTTP 端点（自部署模型用），默认 `false` |
+| `llm.verify_ssl` | 跳过 TLS 证书校验（自签名证书端点用），默认 `true` |
 
 `config/cloud.yaml` 被 Git 忽略。不要把密钥放入 Android 工程、APK、截图、日志或提交历史。
 
@@ -88,7 +90,7 @@ $adb="$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
 | 位置 | 内容 | 使用方式 |
 |---|---|---|
 | `log/agent/agent.log` | Agent 请求、摘要元数据、响应和错误 | 在 Agent 主机读取；不记录原始 XML |
-| Android `files/log/android.log` | 原始 XML、Agent 响应、执行动作及实际节点 | 设置页点击“发送 Android 日志” |
+| Android `files/log/android.log` | 摘要节点数、Agent 响应、执行动作及实际节点（不含原始 XML） | 设置页点击“发送 Android 日志” |
 | `log/android/` | 用户上传后的 Android 诊断日志 | 在 Agent 项目目录查看 |
 
 一个任务使用相同的 16 位十六进制 session ID 串联 Android 与 Agent 日志。上传接口为

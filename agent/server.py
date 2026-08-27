@@ -26,7 +26,7 @@ from agent.agent_loop import decide_once
 from agent.cloud_config import load_cloud_config
 from agent.llm_client import LLMClient
 from agent.skill_router import route_fixed_skill
-from agent.ui_summarizer import summarize_xml, to_llm_prompt
+from agent.ui_summarizer import summarize_xml, to_llm_prompt, to_window_layers
 from agent.ui_diff import render_ui_diff
 
 logger = logging.getLogger("tars.server")
@@ -58,7 +58,8 @@ decision_fn: Callable = _runtime_not_configured
 
 def configure_runtime(*, mock: bool = False, base_url: str = "", model: str = "",
                       api_key: str = "", timeout_seconds: float = 60.0,
-                      max_retries: int = 2, retry_backoff_seconds: float = 1.0) -> None:
+                      max_retries: int = 2, retry_backoff_seconds: float = 1.0,
+                      verify_ssl: bool = True) -> None:
     """Configure the process-local decision backend before serving HTTP requests.
 
     Mock mode is intentionally explicit: it proves the Android-to-Agent loopback
@@ -83,6 +84,7 @@ def configure_runtime(*, mock: bool = False, base_url: str = "", model: str = ""
     llm = LLMClient(
         base_url=base_url, model=model, api_key=api_key, timeout=timeout_seconds,
         max_retries=max_retries, retry_backoff_seconds=retry_backoff_seconds,
+        verify_ssl=verify_ssl,
     )
     decision_fn = lambda **kwargs: decide_once(llm=llm, **kwargs)
 
@@ -117,7 +119,8 @@ def main() -> None:
         config = load_cloud_config(args.config)
         configure_runtime(base_url=config.base_url, model=config.model, api_key=config.api_key,
                           timeout_seconds=config.timeout_seconds, max_retries=config.max_retries,
-                          retry_backoff_seconds=config.retry_backoff_seconds)
+                          retry_backoff_seconds=config.retry_backoff_seconds,
+                          verify_ssl=config.verify_ssl)
     import uvicorn
     logger.info("Agent listening on %s:%d", args.host, args.port)
     uvicorn.run(app, host=args.host, port=args.port)
@@ -175,18 +178,26 @@ def agent_run(req: dict) -> dict:
         except ET.ParseError as exc:
             raise HTTPException(status_code=400, detail=f"ui_xml 不是合法 XML: {exc}") from exc
 
+    # Android 侧已摘要的节点是事实来源（采集即摘要，动作 ID 与执行侧天然一致）；
+    # ui_xml 仅在旧客户端/测试路径回退摘要。
+    nodes = req.get("nodes") or []
+    if not nodes and ui_xml.strip():
+        nodes = summarize_xml(ui_xml)
+    window_layers = req.get("window_layers") or ""
+    if not window_layers and ui_xml.strip():
+        window_layers = to_window_layers(ui_xml)
+
     logger.info(
-        "agent request session=%s app=%s activity=%s nodes=%d history_rounds=%d",
+        "agent request session=%s app=%s activity=%s nodes=%d history_rounds=%d ui_bytes=%d",
         req["session_id"], req.get("app") or "-", req.get("activity") or "-",
-        ui_xml.count("<node"), len(req.get("history") or []),
+        len(nodes), len(req.get("history") or []), len(ui_xml),
     )
     logger.info(
-        "agent context session=%s intent=%r app=%r activity=%r ui_bytes=%d observation=%r launchable_apps=%d",
+        "agent context session=%s intent=%r app=%r activity=%r observation=%r launchable_apps=%d window_layers_bytes=%d",
         req["session_id"], req.get("intent"), req.get("app"), req.get("activity"),
-        len(ui_xml), req.get("observation_note") or "",
-        len(req.get("launchable_apps") or []),
+        req.get("observation_note") or "",
+        len(req.get("launchable_apps") or []), len(window_layers),
     )
-    _diag_nodes = summarize_xml(ui_xml)
     try:
         launchable_apps = req.get("launchable_apps") or []
         fixed_response = route_fixed_skill(
@@ -201,22 +212,23 @@ def agent_run(req: dict) -> dict:
         resp = decision_fn(
             session_id=req["session_id"],
             intent=req["intent"],
-            ui_xml=req.get("ui_xml", ""),
+            nodes=nodes,
+            window_layers=window_layers,
             history=req.get("history"),
             app=req.get("app"),
             activity=req.get("activity"),
             observation_note=req.get("observation_note", ""),
             previous_nodes=(
-                render_ui_diff(_prev_node_models.get(req["session_id"], []), _diag_nodes)
-                if _diag_nodes and _prev_node_models.get(req["session_id"])
-                else (_prev_nodes.get(req["session_id"], "") if not _diag_nodes else "")
+                render_ui_diff(_prev_node_models.get(req["session_id"], []), nodes)
+                if nodes and _prev_node_models.get(req["session_id"])
+                else (_prev_nodes.get(req["session_id"], "") if not nodes else "")
             ),
             launchable_apps=launchable_apps,
         )
-        current_nodes = to_llm_prompt(_diag_nodes)
+        current_nodes = to_llm_prompt(nodes)
         if current_nodes:
             _prev_nodes[req["session_id"]] = current_nodes
-            _prev_node_models[req["session_id"]] = _diag_nodes
+            _prev_node_models[req["session_id"]] = nodes
         response = _validate_response_for_request(resp, req["session_id"])
         logger.info("agent response session=%s source=llm actions=%s done=%s observe=%s",
                     req["session_id"], [a.get("type") for a in response.get("actions", [])],

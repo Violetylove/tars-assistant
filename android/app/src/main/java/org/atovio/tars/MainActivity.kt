@@ -276,6 +276,8 @@ class MainActivity : Activity() {
             AndroidLogStore.append(this, "session=$sessionId task_started intent=${JSONObject.quote(taskIntent)}")
             var consecutiveNoChange = 0
             var noteForNextRound = ""
+            // 轮数溢出检查（Android 侧）：请求只发到用户设置的 maxObservationRounds 为止，
+            // 达到上限即本地结束，不再发送下一轮请求；协议侧已取消 history 轮数上限。
             for (round in 0 until runtime.maxObservationRounds) {
                 if (cancelRequested) {
                     finishCancelledTask()
@@ -283,19 +285,13 @@ class MainActivity : Activity() {
                 }
                 var snapshot = service.captureUiSnapshot()
                 if (snapshot == null) {
-                    val rawUiXml = service.currentDiagnosticUiXml()
                     val currentForeground = service.currentAppPackage() ?: UNKNOWN_FOREGROUND
                     appendLog("当前界面尚未提供有效无障碍树，正在本地等待加载。")
-                    AndroidLogStore.appendBlock(this, buildString {
-                        append("session=$sessionId round=${round + 1} capture_rejected app=")
-                        append(JSONObject.quote(currentForeground))
-                        append(" reason=empty_or_placeholder_root raw_xml_bytes=")
-                        append(rawUiXml.toByteArray(Charsets.UTF_8).size)
-                        append(" raw_ui_xml_begin\n")
-                        append(rawUiXml)
-                        append("\nraw_ui_xml_end\ncapture_sources=")
-                        append(service.captureSourceState())
-                    })
+                    AndroidLogStore.append(
+                        this,
+                        "session=$sessionId round=${round + 1} capture_rejected app=${JSONObject.quote(currentForeground)} " +
+                            "reason=empty_or_placeholder_root capture_sources=${service.captureSourceState()}",
+                    )
                     snapshot = service.awaitStableUi(
                         runtime.observationTimeoutMs + runtime.newAppGraceMs,
                     ) { state ->
@@ -314,22 +310,26 @@ class MainActivity : Activity() {
                         break
                     }
                 }
+                // xml 仅作本地新鲜度指纹，不发送给 Agent；摘要节点与执行节点同源。
                 val uiXml = snapshot.xml
                 val observationVersion = service.currentObservationVersion()
                 val foreground = service.currentAppPackage() ?: UNKNOWN_FOREGROUND
                 appendLog("第 ${round + 1} 轮，前台应用：$foreground")
-                AndroidLogStore.appendBlock(this, buildString {
-                    append("session=$sessionId round=${round + 1} capture app=")
-                    append(JSONObject.quote(foreground))
-                    append(" activity=")
-                    append(JSONObject.quote(service.currentActivity().orEmpty()))
-                    append(" xml_bytes=${uiXml.toByteArray(Charsets.UTF_8).size} ui_xml_begin\n")
-                    append(uiXml)
-                    append("\nui_xml_end")
-                })
+                AndroidLogStore.append(
+                    this,
+                    "session=$sessionId round=${round + 1} capture app=${JSONObject.quote(foreground)} " +
+                        "activity=${JSONObject.quote(service.currentActivity().orEmpty())} " +
+                        "nodes=${snapshot.summaryNodes.size}",
+                )
                 val response = client.run(TaskRequest(
-                    intent = taskIntent, app = service.currentAppPackage(), activity = service.currentActivity(), uiXml = uiXml,
-                    sessionId = sessionId, history = history, observationNote = noteForNextRound.takeIf { it.isNotBlank() },
+                    intent = taskIntent,
+                    app = service.currentAppPackage(),
+                    activity = service.currentActivity(),
+                    nodes = snapshot.summaryNodes.map { it.toJson() },
+                    windowLayers = snapshot.windowLayers,
+                    sessionId = sessionId,
+                    history = history,
+                    observationNote = noteForNextRound.takeIf { it.isNotBlank() },
                     launchableApps = LaunchableApps.selectedInstalled(this),
                 )).let { parsed ->
                     if (parsed.actions.size <= MAX_ACTIONS_PER_HISTORY_ENTRY) {

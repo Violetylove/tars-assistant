@@ -60,9 +60,46 @@ def test_task_request_accepts_seven_history_entries():
     assert validate(req, "task_request") == []
 
 
-def test_task_request_rejects_oversized_history():
+def test_task_request_accepts_history_beyond_old_seven_limit():
+    # 轮数上限由 Android 侧用户设置决定（1-20），协议不再对 history 设上限。
     req = _load("task_request.json")
     req["history"] = [{"actions": []}] * 8
+    assert validate(req, "task_request") == []
+
+
+def test_task_request_accepts_history_up_to_user_rounds():
+    req = _load("task_request.json")
+    req["history"] = [{"actions": [{"type": "click", "target_node_id": 0}]}] * 20
+    assert validate(req, "task_request") == []
+
+
+def test_task_request_accepts_summarized_nodes():
+    req = _load("task_request.json")
+    req["nodes"] = [{
+        "id": 0,
+        "_resource_id": "com.android.settings:id/entry",
+        "type": "button",
+        "text": "设置",
+        "bounds": [0, 0, 100, 50],
+        "clickable": True,
+        "focusable": False,
+        "focused": False,
+        "layer": 0,
+        "depth": 0,
+        "container": "",
+    }]
+    assert validate(req, "task_request") == []
+
+
+def test_task_request_rejects_oversized_nodes():
+    req = _load("task_request.json")
+    req["nodes"] = [{"id": i, "type": "button", "clickable": True} for i in range(61)]
+    assert validate(req, "task_request")
+
+
+def test_task_request_rejects_invalid_node():
+    req = _load("task_request.json")
+    req["nodes"] = [{"id": 0, "type": "button"}]  # 缺 clickable
     assert validate(req, "task_request")
 
 

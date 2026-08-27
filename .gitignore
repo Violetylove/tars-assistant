@@ -5,6 +5,7 @@ __pycache__/
 venv/
 *.egg-info/
 .pytest_cache/
+.pytest_tmp/
 
 # Private deployment configuration (start from committed examples)
 config/cloud.yaml

@@ -300,7 +300,9 @@ def decide_once(
     llm,
     session_id: str,
     intent: str,
-    ui_xml: str,
+    ui_xml: str = "",
+    nodes: Optional[list[dict]] = None,
+    window_layers: str = "",
     history: Optional[list[dict]] = None,
     app: Optional[str] = None,
     activity: Optional[str] = None,
@@ -311,13 +313,18 @@ def decide_once(
 ) -> dict:
     """单轮决策：摘要 + 调 LLM + 净化 + schema 校验。返回合法 agent_response。
 
+    节点优先取自 Android 侧已摘要的 ``nodes``（采集即摘要，动作 ID 与执行侧天然一致）；
+    未提供时才回退由 ``ui_xml`` 摘要（测试与旧客户端兼容路径）。
     若 LLM 输出非法，会带错误提示重试（最多 max_retries 次）；仍失败则返回
     reply=错误说明 + 空 actions（安全拒绝，不抛异常）。
     """
-    nodes = summarize_xml(ui_xml)
+    if nodes is None:
+        nodes = summarize_xml(ui_xml)
+    if not window_layers and ui_xml.strip():
+        window_layers = to_window_layers(ui_xml)
     user_msg = _build_user_message(
         intent, nodes, history or [], app=app, activity=activity,
-        window_layers=to_window_layers(ui_xml), observation_note=observation_note,
+        window_layers=window_layers, observation_note=observation_note,
         previous_nodes=previous_nodes, launchable_apps=launchable_apps,
     )
     messages = [

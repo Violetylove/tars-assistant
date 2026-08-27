@@ -26,6 +26,7 @@ class LLMClient:
                  api_key: str, timeout: float = 60.0,
                  max_retries: int = 2,
                  retry_backoff_seconds: float = 1.0,
+                 verify_ssl: bool = True,
                  sleep_fn: Callable[[float], None] = time.sleep):
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -33,6 +34,7 @@ class LLMClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_backoff_seconds = retry_backoff_seconds
+        self.verify_ssl = verify_ssl
         self._sleep = sleep_fn
         try:
             import requests
@@ -54,6 +56,7 @@ class LLMClient:
                     headers={"Authorization": f"Bearer {self.api_key}"},
                     json=payload,
                     timeout=self.timeout,
+                    verify=self.verify_ssl,
                 )
                 resp.raise_for_status()
                 data = resp.json()

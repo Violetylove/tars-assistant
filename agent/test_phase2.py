@@ -492,6 +492,17 @@ def test_decide_once_launch_requires_a_followup_observation():
     assert resp["need_observation"] is True
 
 
+def test_decide_once_uses_android_provided_nodes():
+    nodes = [{
+        "id": 0, "_resource_id": "app:id/send", "type": "button", "text": "发送",
+        "bounds": [240, 900, 600, 990], "clickable": True, "focusable": False,
+        "focused": False, "layer": 0, "depth": 0, "container": "",
+    }]
+    llm = MockLLM(script=[lambda: json.dumps({"type": "click", "target_node_id": 0})])
+    resp = decide_once(llm=llm, session_id="nodes", intent="点击发送", nodes=nodes, ui_xml="")
+    assert resp["actions"][0]["target_node_id"] == 0
+
+
 def test_run_decision_loop_terminates_on_done():
     llm = MockLLM(script=[lambda: json.dumps({"type": "done"})])
     resp = run_decision_loop(llm=llm, session_id="s1", intent="完成", ui_xml=SIMPLE_XML)
@@ -628,6 +639,27 @@ def test_server_passes_foreground_context_to_decision_backend():
     assert response["done"] is True
     assert captured["app"] == "com.android.settings"
     assert captured["activity"] == "com.android.settings.Settings"
+
+
+def test_server_prefers_android_summarized_nodes_over_ui_xml():
+    srv = _fresh_server()
+    captured = {}
+    srv.decision_fn = lambda **kwargs: captured.update(kwargs) or {
+        "protocol_version": "1.0", "session_id": kwargs["session_id"], "done": True,
+        "reply": "OK", "actions": [], "need_observation": False,
+    }
+    nodes = [{
+        "id": 0, "_resource_id": "app:id/x", "type": "button", "text": "发送",
+        "bounds": [0, 0, 100, 50], "clickable": True, "focusable": False,
+        "focused": False, "layer": 0, "depth": 0, "container": "",
+    }]
+    srv.agent_run({
+        "protocol_version": "1.0", "session_id": "nodes-preferred", "intent": "测试",
+        "nodes": nodes, "ui_xml": SIMPLE_XML,
+        "window_layers": "- application@层0 bounds=[0,0][1080,2400]",
+    })
+    assert captured["nodes"] == nodes
+    assert captured["window_layers"] == "- application@层0 bounds=[0,0][1080,2400]"
 
 
 def test_server_never_logs_raw_ui_xml(caplog):
@@ -793,6 +825,49 @@ def test_cloud_config_loads_https_provider_settings(tmp_path):
     assert loaded.timeout_seconds == 90
     assert loaded.max_retries == 3
     assert loaded.retry_backoff_seconds == 2
+
+
+def test_cloud_config_rejects_http_by_default(tmp_path):
+    config = tmp_path / "cloud.yaml"
+    config.write_text(
+        "llm:\n  base_url: 'http://127.0.0.1:11434/v1'\n  model: 'qwen2.5'\n"
+        "  api_key: 'local-key'\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="allow_insecure_http"):
+        load_cloud_config(config)
+
+
+def test_cloud_config_allows_http_and_short_key_when_enabled(tmp_path):
+    config = tmp_path / "cloud.yaml"
+    config.write_text(
+        "llm:\n  base_url: 'http://127.0.0.1:11434/v1'\n  model: 'qwen2.5'\n"
+        "  api_key: 'any'\n  allow_insecure_http: true\n",
+        encoding="utf-8",
+    )
+    loaded = load_cloud_config(config)
+    assert loaded.base_url == "http://127.0.0.1:11434/v1"
+    assert loaded.allow_insecure_http is True
+
+
+def test_cloud_config_loads_verify_ssl_false(tmp_path):
+    config = tmp_path / "cloud.yaml"
+    config.write_text(
+        "llm:\n  base_url: 'https://selfhost.local/v1'\n  model: 'qwen2.5'\n"
+        "  api_key: 'short'\n  verify_ssl: false\n",
+        encoding="utf-8",
+    )
+    loaded = load_cloud_config(config)
+    assert loaded.verify_ssl is False
+    assert loaded.allow_insecure_http is False
+
+
+def test_llm_client_exposes_verify_ssl():
+    client = LLMClient(
+        base_url="http://127.0.0.1:11434/v1", model="qwen2.5", api_key="any",
+        timeout=30, verify_ssl=False, sleep_fn=lambda _: None,
+    )
+    assert client.verify_ssl is False
 
 
 @pytest.mark.parametrize("extra", ["max_retries: 4", "retry_backoff_seconds: 11", "timeout_seconds: 0"])

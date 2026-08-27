@@ -91,10 +91,13 @@ _COMMON_DEFS = {
                 "maxItems": 4,
             },
             "clickable": {"type": "boolean"},
+            "focusable": {"type": "boolean"},
             "focused": {"type": "boolean"},
             "layer": {"type": "integer", "minimum": 0},
             "depth": {"type": "integer", "minimum": 0},
             "container": {"type": "string"},
+            # 内部 diff 键（资源 ID），仅用于 Agent 侧 UI 变化匹配，绝不写入 LLM 提示。
+            "_resource_id": {"type": "string"},
         },
         "required": ["id", "type", "clickable"],
         "additionalProperties": False,
@@ -156,11 +159,17 @@ SCHEMAS = {
             "app": {"type": "string"},
             "activity": {"type": "string"},
             "ui_xml": {"type": "string"},
+            "nodes": {
+                "type": "array",
+                "items": _ref("ui_node"),
+                "maxItems": 60,
+            },
+            "window_layers": {"type": "string", "maxLength": 2000},
             "observation_note": {"type": "string", "maxLength": 500},
             "history": {
                 "type": "array",
                 "items": _ref("history_entry"),
-                "maxItems": 7,
+                # 轮数检查在 Android 侧（以用户设置的观察轮数为准），协议不再设上限。
             },
             "launchable_apps": {
                 "type": "array",

@@ -6,11 +6,11 @@
 
 ```text
 MainActivity / 触发器
-  -> TarsAccessibilityService.currentUiXml()
-  -> AgentClient POST /agent/run
+  -> TarsAccessibilityService.captureUiSnapshot()
+  -> UiSummarizer（采集即摘要，节点=执行节点）
+  -> AgentClient POST /agent/run（nodes + window_layers）
   -> agent.server.agent_run()
-  -> agent_loop.decide_once()
-  -> ui_summarizer + 云端模型
+  -> agent_loop.decide_once() + 云端模型
   -> bridge schema 校验
   -> TarsAccessibilityService.execute()
   -> ActionExecutor / ShizukuGateway
@@ -22,7 +22,7 @@ MainActivity / 触发器
 | 路径 | 职责 |
 |---|---|
 | `android/` | Kotlin 执行侧、对话 UI、设置、无障碍与 Shizuku |
-| `agent/` | FastAPI 服务、摘要、模型循环、固定技能和 UI diff |
+| `agent/` | FastAPI 服务、模型循环、固定技能和 UI diff |
 | `bridge/` | JSON Schema 与协议校验 |
 | `config/` | 私有云端配置模板；真实 `cloud.yaml` 不入库 |
 | `scripts/` | Agent 部署与协议烟测 |
@@ -32,10 +32,11 @@ MainActivity / 触发器
 
 | 文件 | 关键职责 | 修改时注意 |
 |---|---|---|
-| `MainActivity.kt` | 对话 UI、任务循环、状态检查、终止、history、Android 日志写入 | 不在此做 UI 摘要或模型决策 |
+| `MainActivity.kt` | 对话 UI、任务循环、轮数上限检查、终止、history、Android 日志写入 | 不在此做模型决策；轮数上限=用户设置 `maxObservationRounds` |
+| `UiSummarizer.kt` | 无障碍树 → 紧凑节点（采集即摘要）；摘要节点与执行节点同源 | 摘要字段/筛选改动须同步回退实现 `agent/ui_summarizer.py` |
 | `SettingsActivity.kt` | 权限入口、运行参数、日志上传、应用列表入口 | 配置规则仍归 `RuntimeSettings` |
 | `LaunchableAppsActivity.kt` / `LaunchableApps.kt` | 枚举、刷新、勾选和校验 launcher 应用 | 保存前后均验证应用仍安装 |
-| `TarsAccessibilityService.kt` | 多窗口采集、事件根回退、前台上下文、稳定 UI 等待、`UiSnapshot` | 空骨架只供本地诊断，不能进入 Agent 请求；同一快照的节点顺序必须和 Python 对齐 |
+| `TarsAccessibilityService.kt` | 多窗口采集、事件根回退、前台上下文、稳定 UI 等待、`UiSnapshot` | 摘要与执行共用同一节点列表；原始 XML 仅作本地新鲜度指纹，不发送 |
 | `ActionExecutor.kt` | 动作白名单、节点匹配、输入解析、敏感确认 | 动作/敏感语义改动须同步 Python 和 schema |
 | `ActionConfirmationOverlay.kt` | 前台无障碍敏感确认浮层 | 不泄露内部节点编号 |
 | `AgentClient.kt` | `/health`、`/agent/run`、取消连接、日志上传、HTTP 诊断 | 校验响应 session ID |
@@ -49,9 +50,9 @@ MainActivity / 触发器
 
 | 文件 | 关键职责 | 修改时注意 |
 |---|---|---|
-| `server.py` | HTTP 门面、请求/响应校验、日志上传、会话级 UI diff 缓存 | 原始 XML 只在 Android 诊断日志保留 |
+| `server.py` | HTTP 门面、请求/响应校验、日志上传、会话级 UI diff 缓存 | 优先采用请求 `nodes`；`ui_xml` 仅回退摘要；不保存原始 XML |
 | `agent_loop.py` | 系统提示、模型消息、解析、敏感确认和响应规范化 | 保持 schema fail-closed |
-| `ui_summarizer.py` | XML 到节点摘要、窗口层级和 prompt | 不能改变 Android 动作 ID 含义 |
+| `ui_summarizer.py` | 回退摘要：XML 到节点、窗口层级和 prompt（测试/旧客户端） | 语义须与 Android `UiSummarizer.kt` 对齐 |
 | `ui_diff.py` | 连续 UI 摘要的紧凑变化描述 | 缓存空摘要前必须确认不会覆盖有效上下文 |
 | `llm_client.py` | OpenAI-compatible 请求与有界重试 | 错误不可泄露 API Key |
 | `cloud_config.py` | 私有云端配置读取 | 禁止把实际配置加入 Git |

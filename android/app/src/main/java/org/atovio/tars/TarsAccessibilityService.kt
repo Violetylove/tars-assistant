@@ -66,24 +66,6 @@ class TarsAccessibilityService : AccessibilityService() {
 
     fun currentUiXml(): String = captureUiSnapshot()?.xml.orEmpty()
 
-    /**
-     * Serializes the raw application roots for local diagnosis only. A transition placeholder
-     * is useful evidence in Android logs, but is never a valid Agent request payload.
-     */
-    fun currentDiagnosticUiXml(): String {
-        val eventFallback = eventSourceFallback()
-        val roots = collectApplicationWindowRoots() + listOfNotNull(eventFallback)
-        if (roots.isEmpty()) {
-            eventFallback?.recycle()
-            return ""
-        }
-        return try {
-            serializeUiRoots(roots)
-        } finally {
-            eventFallback?.recycle()
-        }
-    }
-
     private fun serializeUiRoots(roots: List<AccessibilityNodeInfo>): String {
         val dm = resources.displayMetrics
         val facts = windowFacts()
@@ -161,59 +143,11 @@ class TarsAccessibilityService : AccessibilityService() {
     fun collectVisibleNodes(): List<Pair<AccessibilityNodeInfo, Int>> =
         collectVisibleNodes(collectVisibleWindowRoots())
 
+    /** Same order as the UiSummarizer node IDs: layer (z-order) then tree order. */
     private fun collectVisibleNodes(roots: List<AccessibilityNodeInfo>): List<Pair<AccessibilityNodeInfo, Int>> {
-        val covered = mutableListOf<android.graphics.Rect>()
-        val visible = mutableListOf<Pair<AccessibilityNodeInfo, Int>>() // (node, layerIndex)
-        val allWindows = try { windows } catch (_: Throwable) { emptyList<AccessibilityWindowInfo>() }
-        Log.i(TAG_A11Y, String.format("collectVisible roots=%d totalWindows=%d types=%s",
-            roots.size, allWindows.size, allWindows.map { it.type }.toString()))
-        var totalNodes = 0
-        var culled = 0
-        // Occlusion only applies across layers: nodes of the same layer share one visual
-        // plane (transparent containers must not occlude their siblings/children).
-        val layerNodes = roots.withIndex().map { (layer, root) ->
-            val nodes = mutableListOf<AccessibilityNodeInfo>()
-            collectAllNodes(root, nodes)
-            totalNodes += nodes.size
-            layer to nodes
-        }
-        // Process layers top-down; only layer 0 may occlude lower layers.
-        for ((layer, nodes) in layerNodes) {
-            for (n in nodes) {
-                val b = android.graphics.Rect().also { n.getBoundsInScreen(it) }
-                // Keep zero-size interactive nodes in the ID stream. Some apps (notably
-                // Gmail's compose FAB shortcut) expose a clickable semantic node with
-                // bounds=[0,0][0,0]. The Python summarizer intentionally keeps these
-                // nodes too, so dropping them here would shift every subsequent ID.
-                val zeroSize = b.isEmpty
-                // Mirror agent.ui_summarizer._is_interactive: only interactive nodes
-                // participate in ID numbering, otherwise model IDs drift from execution IDs.
-                if (b.left < 0 || b.top < 0) continue
-                val className = n.className?.toString().orEmpty()
-                val importantClass = className.contains("Button", ignoreCase = true) ||
-                    className.contains("EditText", ignoreCase = true) ||
-                    className.contains("CheckBox", ignoreCase = true) ||
-                    className.contains("RadioButton", ignoreCase = true) ||
-                    className.contains("Switch", ignoreCase = true) ||
-                    className.contains("ImageButton", ignoreCase = true)
-                if (!(n.isClickable || n.isFocusable || (importantClass && n.isEnabled))) continue
-                // Skip full-screen container nodes from occluding anything (transparent root).
-                if (b.width() >= resources.displayMetrics.widthPixels - 1 &&
-                    b.height() >= resources.displayMetrics.heightPixels - 1) continue
-                if (!zeroSize && layer > 0 && covered.any { it.contains(b) }) { culled++; continue }
-                visible += n to layer
-                if (layer == 0 && !zeroSize) covered += b
-            }
-        }
-        Log.i(TAG_A11Y, String.format("collectVisible totalNodes=%d culled=%d visible=%d",
-            totalNodes, culled, visible.size))
-        return visible
-    }
-
-    private fun collectAllNodes(node: AccessibilityNodeInfo?, out: MutableList<AccessibilityNodeInfo>) {
-        if (node == null) return
-        out += node
-        for (i in 0 until node.childCount) node.getChild(i)?.let { collectAllNodes(it, out) }
+        val dm = resources.displayMetrics
+        val summary = UiSummarizer.summarize(roots, windowFacts(), dm.widthPixels, dm.heightPixels)
+        return summary.nodes.map { it.node to it.layer }
     }
 
     /** The event stream updates before rootInActiveWindow during app transitions.
@@ -234,13 +168,22 @@ class TarsAccessibilityService : AccessibilityService() {
 
     fun currentObservationVersion(): Long = observationVersion
 
-    /** One coherent XML/node view used by both the model request and action execution. */
+    /** One coherent UI view used by the model request, action execution and freshness checks.
+     *
+     * The summarized nodes are the single source for both the request payload and execution
+     * node IDs; the serialized XML remains only as an internal freshness fingerprint and is
+     * never sent to the Agent.
+     */
     fun captureUiSnapshot(): UiSnapshot? {
         val roots = collectVisibleWindowRoots()
         if (roots.isEmpty()) return null
+        val dm = resources.displayMetrics
+        val summary = UiSummarizer.summarize(roots, windowFacts(), dm.widthPixels, dm.heightPixels)
         return UiSnapshot(
             xml = serializeUiRoots(roots),
-            visibleNodes = collectVisibleNodes(roots).map { it.first },
+            summaryNodes = summary.nodes,
+            visibleNodes = summary.visibleNodes,
+            windowLayers = summary.windowLayers,
             packageName = currentAppPackage(),
             activity = currentActivity(),
         )
@@ -488,11 +431,11 @@ class TarsAccessibilityService : AccessibilityService() {
     }
 }
 
-private data class WindowFact(val typeLabel: String, val layer: Int, val bounds: List<Int>)
-
 data class UiSnapshot(
     val xml: String,
+    val summaryNodes: List<UiSummarizer.SummarizedNode>,
     val visibleNodes: List<AccessibilityNodeInfo>,
+    val windowLayers: String,
     val packageName: String?,
     val activity: String?,
 )

@@ -27,10 +27,10 @@
 |---|---|---|---|
 | 动作白名单 | `click,type,swipe,back,home,launch,wait,reply,done` | Android + `bridge/schemas.py` | 两端必须一致 |
 | 敏感标签 | 发送、删除、清除、支付、付款、转账及英文对应词 | Android + Python | 只能加严，不能放宽 |
-| history 上限 | 7 轮 | `bridge/schemas.py` | 每任务最多回传 7 轮压缩历史 |
-| 单轮动作上限 | 8 | `bridge/schemas.py` | 响应和 history 均受限 |
-| 摘要节点上限 | 60 | `ui_summarizer.py` | 目标约 500 token；动作 ID 必须与 Android 对齐 |
-| 关键类名 token | `button, edittext, checkbox, radiobutton, switch, imagebutton` | Android + Python | 采用相同 contains 语义 |
+| history 轮数上限 | 用户设置 `max_observation_rounds`（1-20） | Android `RuntimeSettings` | 轮数检查在 Android 侧，协议不设上限 |
+| 单轮动作上限 | 8 | `bridge/schemas.py` | 响应和 history 每轮均受限 |
+| 摘要节点上限 | 60 | `UiSummarizer.kt`（Android） | 目标约 500 token；动作 ID 与执行侧同源 |
+| 关键类名 token | `button, edittext, checkbox, radiobutton, switch, imagebutton` | Android `UiSummarizer.kt` | 采用相同 contains 语义；`ui_summarizer.py` 仅作回退 |
 
 ## C 类：私有云端配置
 
@@ -38,12 +38,14 @@
 
 | 参数 | 默认值 | 校验 |
 |---|---:|---|
-| `llm.base_url` | 必填 | HTTPS 地址 |
+| `llm.base_url` | 必填 | http 或 https；http 需 `allow_insecure_http=true` |
 | `llm.model` | 必填 | 非空且非占位符 |
-| `llm.api_key` | 必填 | 仅私有文件保存，绝不写入日志 |
+| `llm.api_key` | 必填 | 仅私有文件保存，绝不写入日志；自托管（见下）可放宽长度 |
 | `llm.timeout_seconds` | `60` | 正数 |
 | `llm.max_retries` | `2` | 0-3 |
 | `llm.retry_backoff_seconds` | `1` | 0-10 |
+| `llm.allow_insecure_http` | `false` | 允许明文 HTTP 端点（自部署模型；仅限可信网络） |
+| `llm.verify_ssl` | `true` | 跳过 TLS 证书校验（自签名证书端点用） |
 
 ## 日志
 
@@ -55,4 +57,5 @@ Agent 将其保存到项目根目录的 `log/android/`。Agent 自身审计日�
 
 1. 改协议、动作或安全边界时，先更新 `docs/DESIGN.md` 与 `bridge/`，再同步本表和两端实现。
 2. 新的用户设置必须有默认值、范围/格式校验及恢复默认值路径。
-3. 改 UI 节点筛选、动作 ID 或敏感判定时，必须同步 Android 与 Python，并添加回归测试。
+3. 改 UI 节点筛选、动作 ID 或敏感判定时，以 Android `UiSummarizer.kt` 为准，同步回退实现
+   `ui_summarizer.py` 并添加回归测试。

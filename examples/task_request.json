@@ -4,6 +4,34 @@
   "intent": "打开微信给张三发消息：今晚八点开会",
   "app": "com.tencent.mm",
   "activity": "com.tencent.mm.ui.LauncherUI",
-  "ui_xml": "<node text=\"微信\" clickable=\"true\" ...>",
+  "nodes": [
+    {
+      "id": 0,
+      "_resource_id": "com.tencent.mm:id/search",
+      "type": "input",
+      "text": "搜索",
+      "bounds": [40, 200, 760, 300],
+      "clickable": false,
+      "focusable": true,
+      "focused": true,
+      "layer": 0,
+      "depth": 0,
+      "container": ""
+    },
+    {
+      "id": 1,
+      "_resource_id": "com.tencent.mm:id/send",
+      "type": "button",
+      "text": "发送",
+      "bounds": [240, 900, 600, 990],
+      "clickable": true,
+      "focusable": false,
+      "focused": false,
+      "layer": 0,
+      "depth": 1,
+      "container": "发送"
+    }
+  ],
+  "window_layers": "- application@层0 bounds=[0,0][1080,2400]\n- input_method@层1 bounds=[0,1593][1080,2400]",
   "history": []
 }

@@ -7,7 +7,7 @@
 ## Project
 
 - 形态（决策 D1/D10）：事件驱动。**原生 Kotlin App** 监听触发（定时/通知/悬浮语音）→ 调 Python Agent 决策 → **原生 App** 执行动作。
-- 感知（决策 D2）：纯文本 UI 树（uiautomator/无障碍采集 → Agent 端摘要），非视觉模型。
+- 感知（决策 D2）：纯文本 UI 树（无障碍采集 → Android 侧摘要为紧凑交互节点），非视觉模型。
 - 模型（决策 D3）：云端 OpenAI-compatible 模型，经私有 `config/cloud.yaml` 接入；换模型只改配置。
 - 推理生命周期（决策 D5）：云端模型按请求调用；手机不部署 GGUF、llama.cpp 或模型进程。
 - 通信（决策 D6）：原生 App↔Agent 仅用纯 HTTP loopback（127.0.0.1:8080），不引 WebSocket/MQTT 常驻通道；Termux:API 仅作感知插件（D7）。
@@ -34,9 +34,10 @@
 | 模块 | 角色 |
 |------|------|
 | `agent/` | FastAPI 服务 + 自研安全 Agent 决策循环 + LLM 客户端（决策层，Python） |
-| `agent/ui_summarizer.py` | 原始 UI 树 XML → 紧凑交互节点列表（≤500 token） |
+| `android/.../UiSummarizer.kt` | 无障碍树 → 紧凑交互节点列表（≤60 节点/≤500 token）；采集即摘要，动作 ID 与执行侧同源 |
+| `agent/ui_summarizer.py` | 保留作测试/旧客户端回退摘要（语义与 UiSummarizer.kt 对齐） |
 | `bridge/` | 通信契约：JSON Schema 定义 + 校验器 |
-| `android/` | 原生执行侧 App（Kotlin）：UI 采集、动作执行（无障碍/Shizuku）、HTTP client、触发入口 |
+| `android/` | 原生执行侧 App（Kotlin）：UI 采集与摘要、动作执行（无障碍/Shizuku）、HTTP client、触发入口 |
 | `scripts/` | 协议冒烟与部署辅助脚本（`smoke_agent.py`、`deploy_agent.sh`） |
 | `docs/` | DESIGN.md（设计书）、PROJECT_PLAN.md（计划与进度） |
 
@@ -47,8 +48,8 @@
 - **安全边界**：高权限动作（点击/滑动/输入）须过白名单；关键操作（支付/删除/发送）默认要求确认。
 - **模型解耦**：LLM 客户端可 mock；开发与测试不依赖真实模型和网络。
 - **云端模型解耦**：模型端点和模型 ID 位于 Git 忽略的 `config/cloud.yaml`，换模型不改代码。
-- **UI 摘要归属 Agent 侧**：原生 App 只采集并回传原始 UI 树，摘要逻辑在 `agent/ui_summarizer.py`（可单测），App 端不做解析。
-- **HTTP 服务仅监听 127.0.0.1**，不暴露到局域网。
+- **UI 摘要归属 Android 侧**：原生 App 采集无障碍树并用 `UiSummarizer.kt` 摘要为紧凑节点回传，摘要节点与执行节点同源，天然避免 ID 不一致；`agent/ui_summarizer.py` 仅保留作测试/旧客户端回退。
+- **Agent 监听与客户端目标**：Agent 服务监听地址由启动参数决定（默认 `0.0.0.0`）；Android 客户端默认连本机 `127.0.0.1` loopback，`0.0.0.0` 只能作监听地址。
 - **决策层不可动**：Agent 决策逻辑恒为 Python（D12），原生侧只做 HTTP client + 动作执行。
 - **框架现状**：当前循环是 SmolAgent 风格的自研实现，尚未依赖 `smolagents`；后续接入该框架时，schema 校验、动作白名单与用户确认仍不可绕过。
 

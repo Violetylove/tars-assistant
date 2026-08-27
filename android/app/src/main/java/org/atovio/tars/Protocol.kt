@@ -13,7 +13,8 @@ data class TaskRequest(
     val intent: String,
     val app: String? = null,
     val activity: String? = null,
-    val uiXml: String? = null,
+    val nodes: List<org.json.JSONObject> = emptyList(),
+    val windowLayers: String? = null,
     val sessionId: String = UUID.randomUUID().toString(),
     val history: JSONArray = JSONArray(),
     val observationNote: String? = null,
@@ -25,7 +26,8 @@ data class TaskRequest(
         put("intent", intent)
         app?.let { put("app", it) }
         activity?.let { put("activity", it) }
-        uiXml?.let { put("ui_xml", it) }
+        if (nodes.isNotEmpty()) put("nodes", JSONArray(nodes))
+        windowLayers?.takeIf { it.isNotBlank() }?.let { put("window_layers", it) }
         observationNote?.takeIf { it.isNotBlank() }?.let { put("observation_note", it) }
         put("history", history)
         put("launchable_apps", JSONArray().apply {

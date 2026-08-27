@@ -10,3 +10,9 @@ llm:
   # Retry only transient network failures, HTTP 429, and HTTP 5xx responses.
   max_retries: 2
   retry_backoff_seconds: 1
+  # 自部署模型（如 Ollama / llama.cpp 等本地 OpenAI-compatible 服务）可按需放开：
+  # - 端点走明文 HTTP 时：allow_insecure_http: true（仅限可信网络，密钥会明文传输）
+  # - 自签名证书的 HTTPS 端点：verify_ssl: false（跳过 TLS 证书校验）
+  # 二者默认均为安全值（false / true），不要对公网云端模型开启。
+  allow_insecure_http: false
+  verify_ssl: true
